@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ALL_STOCKS, priceHistory } from '@/lib/api/demo'
 import { DEMO_MODE } from '@/lib/api/client'
+import { listStocks } from '@/lib/api/services'
 import { fmtCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -79,23 +80,51 @@ function useTypewriter(phrases: string[], typeMs = 38, holdMs = 2400) {
   return text
 }
 
-/** Live ticking prices for the terminal footer (demo feed only) */
+/** Live ticking prices for the terminal footer.
+ *
+ * Demo mode: synthetic drift every 1.4s. Production: real prices from
+ * /stocks on mount, with a gentle client-side drift to simulate live
+ * ticking (the API prices update every 10-minute refresh, not tick-by-tick).
+ */
 function useLiveQuotes(symbols: string[]) {
-  const base = useMemo(
-    () =>
-      symbols.map((s) => {
+  const [quotes, setQuotes] = useState(() => {
+    if (DEMO_MODE) {
+      return symbols.map((s) => {
         const stock = ALL_STOCKS.find((x) => x.symbol === s)
         return { sym: s, price: stock?.current_price ?? 100, chg: stock?.price_change_pct ?? 0 }
-      }),
-    [symbols],
-  )
-  const [quotes, setQuotes] = useState(base)
+      })
+    }
+    // Production: start empty, fill from API
+    return symbols.map((s) => ({ sym: s, price: null as number | null, chg: 0 }))
+  })
 
+  // Production: fetch real prices from the backend
+  useEffect(() => {
+    if (DEMO_MODE) return
+    let cancelled = false
+    listStocks(50, 0)
+      .then((res) => {
+        if (cancelled) return
+        const bySymbol = new Map(res.results.map((s) => [s.symbol, s]))
+        setQuotes((prev) =>
+          prev.map((q) => {
+            const real = bySymbol.get(q.sym)
+            if (!real) return q
+            return { sym: q.sym, price: real.current_price ?? q.price, chg: real.price_change_pct ?? 0 }
+          }),
+        )
+      })
+      .catch(() => { /* API unreachable — quotes stay null, handled below */ })
+    return () => { cancelled = true }
+  }, [])
+
+  // Gentle client-side drift so prices feel alive between refreshes
   useEffect(() => {
     if (REDUCED) return
     const id = setInterval(() => {
       setQuotes((prev) =>
         prev.map((q) => {
+          if (q.price === null) return q
           const drift = (Math.random() - 0.5) * 0.006
           const price = q.price * (1 + drift)
           return { ...q, price, chg: q.chg + drift * 100 }
@@ -145,7 +174,7 @@ export function TerminalHero() {
             <span className="flex items-center gap-2">
               <span className="font-mono text-xs font-bold text-text-hi">NVDA</span>
               <span className="text-2xs text-text-low">
-                {DEMO_MODE ? 'Daily · 42 bars' : 'Price feed — demo only'}
+                {DEMO_MODE ? 'Daily · 42 bars' : 'Daily · live universe'}
               </span>
             </span>
             {DEMO_MODE && (
@@ -158,9 +187,14 @@ export function TerminalHero() {
 
           {!DEMO_MODE && (
             <div className="flex h-[200px] items-center justify-center rounded-xl border border-dashed border-white/10 px-4 text-center">
-              <p className="max-w-[220px] text-xs leading-relaxed text-text-low">
-                Connect the price-series endpoint to render live candles here.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs leading-relaxed text-text-mid">
+                  Live candle data requires the price-series endpoint.
+                </p>
+                <p className="text-2xs text-text-low">
+                  The ticker and quotes below use real market data from /stocks.
+                </p>
+              </div>
             </div>
           )}
 
@@ -278,32 +312,32 @@ export function TerminalHero() {
             )}
           </div>
 
-          {/* Live quotes strip (demo feed only) */}
-          {DEMO_MODE && (
-            <div className="mt-3 grid grid-cols-4 gap-2 border-t border-white/[0.08] pt-3">
-              {liveQuotes.map((q) => (
-                <div key={q.sym} className="min-w-0">
-                  <p className="font-mono text-2xs font-bold text-text-hi">{q.sym}</p>
-                  <p
-                    className={cn(
-                      'font-mono text-xs font-semibold tabular',
-                      q.chg >= 0 ? 'text-gain-soft' : 'text-loss-soft',
-                    )}
-                  >
-                    {fmtCurrency(q.price)}
-                  </p>
-                  <p
-                    className={cn(
-                      'font-mono text-2xs tabular',
-                      q.chg >= 0 ? 'text-gain-soft' : 'text-loss-soft',
-                    )}
-                  >
-                    {q.chg >= 0 ? '▲' : '▼'} {Math.abs(q.chg).toFixed(2)}%
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Live quotes strip — real data when API is up, demo drift otherwise */}
+          <div className="mt-3 grid grid-cols-4 gap-2 border-t border-white/[0.08] pt-3">
+            {liveQuotes.map((q) => (
+              <div key={q.sym} className="min-w-0">
+                <p className="font-mono text-2xs font-bold text-text-hi">{q.sym}</p>
+                <p
+                  className={cn(
+                    'font-mono text-xs font-semibold tabular',
+                    q.chg >= 0 ? 'text-gain-soft' : 'text-loss-soft',
+                  )}
+                >
+                  {q.price !== null ? fmtCurrency(q.price) : '—'}
+                </p>
+                <p
+                  className={cn(
+                    'font-mono text-2xs tabular',
+                    q.chg >= 0 ? 'text-gain-soft' : 'text-loss-soft',
+                  )}
+                >
+                  {q.price !== null ? (
+                    <>{q.chg >= 0 ? '▲' : '▼'} {Math.abs(q.chg).toFixed(2)}%</>
+                  ) : 'loading…'}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

@@ -1,11 +1,13 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ALL_STOCKS } from '@/lib/api/demo'
 import { DEMO_MODE } from '@/lib/api/client'
+import { listStocks } from '@/lib/api/services'
 import { fmtCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useReducedMotion } from '@/hooks/useReducedMotion'
+import type { StockResult } from '@/lib/api/types'
 
-function TickerRow({ items, doubled }: { items: typeof ALL_STOCKS; doubled?: boolean }) {
+function TickerRow({ items, doubled }: { items: StockResult[]; doubled?: boolean }) {
   return (
     <div className="flex shrink-0 items-center gap-8 pr-8" aria-hidden={doubled || undefined}>
       {items.map((s) => {
@@ -35,12 +37,35 @@ function TickerRow({ items, doubled }: { items: typeof ALL_STOCKS; doubled?: boo
 }
 
 export function TickerTape({ className }: { className?: string }) {
-  // The backend has no price-series endpoint; the ticker is fed by the
-  // synthetic universe. In production it renders nothing rather than
-  // inventing prices next to real data.
-  const items = useMemo(() => [...ALL_STOCKS].sort(() => Math.random() - 0.5), [])
+  const [liveStocks, setLiveStocks] = useState<StockResult[]>([])
   const reduced = useReducedMotion()
-  if (!DEMO_MODE) return null
+
+  // In demo mode, use the synthetic universe. In production, fetch real
+  // prices from the backend /stocks endpoint (zero LLM, zero Finnhub —
+  // just a DB read, so it's cheap to hit on page load).
+  useEffect(() => {
+    if (DEMO_MODE) return
+    let cancelled = false
+    listStocks(30, 0)
+      .then((res) => {
+        if (!cancelled) setLiveStocks(res.results)
+      })
+      .catch(() => {
+        /* API unreachable — tape stays empty, no error shown */
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const items = useMemo(() => {
+    if (DEMO_MODE) return [...ALL_STOCKS].sort(() => Math.random() - 0.5)
+    // Shuffle live stocks for visual variety
+    return [...liveStocks].sort(() => Math.random() - 0.5)
+  }, [liveStocks])
+
+  // In production with no data yet, render nothing (avoids a flash of
+  // empty space before the API responds).
+  if (!DEMO_MODE && items.length === 0) return null
+
   return (
     <div className={cn('ticker-mask overflow-hidden', className)}>
       {/* Reduced motion: single static row, no marquee loop (the doubled
