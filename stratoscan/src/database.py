@@ -513,6 +513,34 @@ CREATE TABLE IF NOT EXISTS scheduler_heartbeat (
 );
 """
 
+# ── PostgreSQL (main DB): backtest_jobs table ─────────────────────
+# Per-user async backtest job persistence. The in-memory _BACKTEST_JOBS
+# dict is the fast path; this table is the durability layer: on restart,
+# any job with status='running' is marked 'interrupted' so the UI shows
+# "Server restarted" instead of "Job not found". The result JSONB is
+# stored so completed jobs can be retrieved from DB even after the
+# in-memory entry is evicted.
+BACKTEST_JOBS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS backtest_jobs (
+    job_id      TEXT PRIMARY KEY,
+    user_email  TEXT NOT NULL,
+    query       TEXT,
+    status      TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | error | interrupted
+    phase       TEXT,
+    done_symbols JSONB DEFAULT '[]'::jsonb,
+    total_symbols INTEGER DEFAULT 0,
+    result      JSONB,
+    error       TEXT,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+"""
+
+BACKTEST_JOBS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_backtest_jobs_user "
+    "ON backtest_jobs(user_email, created_at DESC);",
+]
+
 # ── PostgreSQL (main DB): user_data table ──────────────────────────
 # Per-user saved state synced from the frontend: watchlist, saved
 # screeners and recent backtests. This was localStorage-only for a long
@@ -629,8 +657,11 @@ class PostgresDB:
                     cur.execute(idx)
                 cur.execute(SCHEDULER_HEARTBEAT_SCHEMA)
                 cur.execute(USER_DATA_SCHEMA)
+                cur.execute(BACKTEST_JOBS_SCHEMA)
+                for idx in BACKTEST_JOBS_INDEXES:
+                    cur.execute(idx)
             conn.commit()
-        logger.info("PostgreSQL stock_master + users + job monitoring schema initialized")
+        logger.info("PostgreSQL stock_master + users + job monitoring + backtest_jobs schema initialized")
 
     # ── User CRUD (auth) ──────────────────────────────────────────────
 

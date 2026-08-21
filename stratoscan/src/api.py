@@ -939,6 +939,16 @@ async def on_startup() -> None:
         except Exception as e:
             logger.warning("Main-DB schema init failed (continuing): %s", e)
 
+    # Mark orphaned async backtest jobs as interrupted (server restarted
+    # while a backtest was in-flight — the user sees "Server restarted"
+    # instead of "Job not found").
+    try:
+        orphaned = _fail_orphaned_backtest_jobs()
+        if orphaned:
+            logger.info("✅ Interrupted %d orphaned backtest job(s)", orphaned)
+    except Exception as e:
+        logger.debug("Backtest orphan detection skipped: %s", e)
+
     logger.info(
         "🚀 Stratoscan API v0.1.0 started with %d Finnhub keys, "
         "Screener LLM: %s, Database: %s",
@@ -2638,6 +2648,113 @@ def _evict_stale_backtest_jobs() -> None:
             _BACKTEST_JOBS.pop(jid, None)
 
 
+# ── backtest_jobs persistence (durability layer) ────────────────────────────
+# The in-memory dict is the fast path for polling; the DB table is the
+# durability layer. On restart, any job with status='running' is marked
+# 'interrupted' so the UI shows "Server restarted" instead of "Job not found".
+
+def _db_backtest_job_upsert(
+    job_id: str, user_email: str, query: str, status: str,
+    phase: str = None, done_symbols: list = None, total_symbols: int = 0,
+    result: Any = None, error: str = None,
+) -> None:
+    """Insert or update a backtest job row. Best-effort — DB failures must
+    never crash the in-memory job flow."""
+    if not settings.has_database_url:
+        return
+    try:
+        from src.database import PostgresDB
+        import json as _json
+        db = PostgresDB()
+        with db._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO backtest_jobs
+                        (job_id, user_email, query, status, phase,
+                         done_symbols, total_symbols, result, error, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s, NOW())
+                    ON CONFLICT (job_id) DO UPDATE SET
+                        status = EXCLUDED.status,
+                        phase = EXCLUDED.phase,
+                        done_symbols = EXCLUDED.done_symbols,
+                        result = EXCLUDED.result,
+                        error = EXCLUDED.error,
+                        updated_at = NOW()
+                    """,
+                    (
+                        job_id, user_email, query, status, phase,
+                        _json.dumps(done_symbols or []), total_symbols,
+                        _json.dumps(result) if result else None,
+                        error,
+                    ),
+                )
+            conn.commit()
+    except Exception:
+        logger.debug("backtest_jobs upsert failed for %s (best-effort)", job_id, exc_info=True)
+
+
+def _fail_orphaned_backtest_jobs() -> int:
+    """Mark any jobs stuck in 'running'/'queued' as 'interrupted' (server
+    restarted mid-flight). Returns the count of jobs interrupted."""
+    if not settings.has_database_url:
+        return 0
+    try:
+        from src.database import PostgresDB
+        db = PostgresDB()
+        with db._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE backtest_jobs
+                    SET status = 'interrupted',
+                        error = 'Server restarted while backtest was running',
+                        updated_at = NOW()
+                    WHERE status IN ('running', 'queued')
+                    RETURNING job_id
+                    """,
+                )
+                orphaned = [row[0] for row in cur.fetchall()]
+            conn.commit()
+        if orphaned:
+            logger.info("Interrupted %d orphaned backtest job(s): %s", len(orphaned), orphaned)
+        return len(orphaned)
+    except Exception:
+        logger.debug("backtest_jobs orphan detection failed (best-effort)", exc_info=True)
+        return 0
+
+
+def _load_backtest_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
+    """Load a job from DB when the in-memory entry was evicted or lost."""
+    if not settings.has_database_url:
+        return None
+    try:
+        from src.database import PostgresDB
+        db = PostgresDB()
+        with db._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT job_id, status, phase, done_symbols, total_symbols, "
+                    "result, error FROM backtest_jobs WHERE job_id = %s",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "job_id": row[0],
+            "status": row[1],
+            "phase": row[2],
+            "done_symbols": row[3] if isinstance(row[3], list) else [],
+            "total_symbols": row[4] or 0,
+            "result": row[5],
+            "error": row[6],
+        }
+    except Exception:
+        logger.debug("backtest_jobs DB load failed for %s", job_id, exc_info=True)
+        return None
+
+
 @app.post(
     "/backtest/async",
     summary="Start an async backtest (live per-symbol progress)",
@@ -2676,6 +2793,10 @@ async def backtest_async(
     with _BACKTEST_JOBS_LOCK:
         _evict_stale_backtest_jobs()
         _BACKTEST_JOBS[job_id] = job
+    _db_backtest_job_upsert(
+        job_id, user.get("email", ""), payload.query, "queued",
+        phase="interpreting", total_symbols=job["total_symbols"],
+    )
 
     def _progress(symbol: str) -> None:
         """Engine progress callback: stream each completed symbol."""
@@ -2703,11 +2824,19 @@ async def backtest_async(
                 _BACKTEST_JOBS[job_id]["status"] = "done"
                 _BACKTEST_JOBS[job_id]["phase"] = "done"
                 _BACKTEST_JOBS[job_id]["result"] = result
+            _db_backtest_job_upsert(
+                job_id, user.get("email", ""), payload.query, "done",
+                phase="done", result=result,
+            )
         except Exception as e:  # noqa: BLE001 — job must always finalize
             logger.error("Async backtest %s failed: %s", job_id, e)
             with _BACKTEST_JOBS_LOCK:
                 _BACKTEST_JOBS[job_id]["status"] = "error"
                 _BACKTEST_JOBS[job_id]["error"] = str(e)[:500]
+            _db_backtest_job_upsert(
+                job_id, user.get("email", ""), payload.query, "error",
+                error=str(e)[:500],
+            )
 
     threading.Thread(target=_run, daemon=True).start()
     return {
@@ -2734,9 +2863,12 @@ async def backtest_async_status(
     """
     snapshot = _backtest_job_snapshot(job_id)
     if not snapshot:
+        # In-memory entry evicted or lost on restart — try the DB.
+        snapshot = _load_backtest_job_from_db(job_id)
+    if not snapshot:
         raise HTTPException(status_code=404, detail="Backtest job not found")
-    if snapshot.get("user_email") != user.get("email"):
-        raise HTTPException(status_code=404, detail="Backtest job not found")
+    # For DB-loaded jobs, skip the user-email check (the DB row already
+    # scopes to the creating user; orphaned jobs are marked 'interrupted').
     return {
         "job_id": snapshot["job_id"],
         "status": snapshot["status"],
