@@ -1,0 +1,173 @@
+# Stratoscan frontend — automatic deployment to Vercel.
+#
+# Pipeline:
+#   1. gate  — typecheck → lint → test → build (production build also runs the
+#              demo-mode guard + Sentry sourcemap upload). NOTHING deploys
+#              unless every check passes.
+#   2. deploy — production deploy to Vercel on push to main (amondnet/vercel-action).
+#   3. preview — ephemeral preview deploy on pull requests (same action, no --prod).
+#   4. healthcheck — curls the deployed URL and confirms the SPA serves.
+#
+# Secrets required (GitHub → Settings → Secrets and variables → Actions):
+#   VERCEL_TOKEN       — Vercel access token (Account → Settings → Tokens)
+#   VERCEL_ORG_ID      — your Vercel team id (Account → Settings → General)
+#   VERCEL_PROJECT_ID  — your Vercel project id (Project → Settings → General)
+#   VITE_API_URL       — production backend origin, e.g. https://stratoscan-api.fly.dev
+#   VITE_SITE_URL      — public site origin, e.g. https://stratoscan.com
+#   VITE_SENTRY_DSN    — Sentry client DSN (public, but keep in secrets for one place)
+#   SENTRY_AUTH_TOKEN  — Sentry auth token (scopes: project:releases, project:write)
+#   SENTRY_ORG         — Sentry org slug
+#   SENTRY_PROJECT     — Sentry project slug
+#   VERCEL_PRODUCTION_URL — optional; falls back to the deployment URL for the
+#                           healthcheck when set.
+
+name: Frontend Deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/frontend-deploy.yml', '.github/workflows/frontend-ci.yml']
+  pull_request:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/frontend-deploy.yml', '.github/workflows/frontend-ci.yml']
+
+concurrency:
+  group: frontend-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: frontend
+
+env:
+  # Build values for the LOCAL gate build — mirrors frontend-ci.yml so the
+  # gated artifact is identical to what CI verifies. NOTE: Vercel rebuilds the
+  # app server-side on deploy; the DEPLOYED build reads its env from the Vercel
+  # project environment (Production/Preview scopes), NOT from this block. Set
+  # the same vars there (see README → Vercel deployment).
+  VITE_API_URL: ${{ secrets.VITE_API_URL }}
+  VITE_SITE_URL: ${{ secrets.VITE_SITE_URL }}
+  VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+  VITE_RELEASE_VERSION: ${{ github.sha }}
+  VITE_DEMO_MODE: 'false'
+  # SENTRY_AUTH_TOKEN is scoped to main-push builds only — PR gate runs must
+  # not upload sourcemaps to Sentry (pollutes the release feed + rate limits).
+  SENTRY_AUTH_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.SENTRY_AUTH_TOKEN || '' }}
+  SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+  SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+
+jobs:
+  gate:
+    name: Gate · Typecheck · Lint · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build (production — demo-mode guard + Sentry sourcemap upload on main only)
+        run: npm run build
+
+  deploy:
+    name: Deploy production → Vercel
+    runs-on: ubuntu-latest
+    needs: gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Vercel (production)
+        id: deploy
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: frontend
+          # --build-env forwards the prod vars to Vercel's server-side build so
+          # the deployed bundle is configured identically to the gated one.
+          vercel-args: >-
+            --prod
+            --build-env VITE_API_URL=${{ secrets.VITE_API_URL }}
+            --build-env VITE_SITE_URL=${{ secrets.VITE_SITE_URL }}
+            --build-env VITE_SENTRY_DSN=${{ secrets.VITE_SENTRY_DSN }}
+            --build-env VITE_RELEASE_VERSION=${{ github.sha }}
+            --build-env VITE_DEMO_MODE=false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-comment: false
+
+      - name: Healthcheck deployed frontend
+        run: |
+          URL="${VERCEL_PRODUCTION_URL:-${{ steps.deploy.outputs.deployment-url }}"
+          echo "Healthchecking ${URL}"
+          for i in $(seq 1 10); do
+            if curl -sfL --max-time 20 "${URL}" -o /tmp/deploy-index.html; then
+              if grep -q '<div id="root">' /tmp/deploy-index.html; then
+                echo "HEALTHY ${URL} (attempt $i)"
+                exit 0
+              fi
+            fi
+            echo "not ready yet (attempt $i), retrying…"
+            sleep 6
+          done
+          echo "Deployed frontend did not become healthy after retries"
+          exit 1
+        env:
+          VERCEL_PRODUCTION_URL: ${{ secrets.VERCEL_PRODUCTION_URL }}
+
+  preview:
+    name: Deploy preview → Vercel
+    runs-on: ubuntu-latest
+    needs: gate
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Vercel (preview)
+        id: preview
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: frontend
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-comment: true
+
+      - name: Healthcheck preview deployment
+        run: |
+          URL="${{ steps.preview.outputs.preview-url }}"
+          echo "Healthchecking ${URL}"
+          for i in $(seq 1 10); do
+            if curl -sfL --max-time 20 "${URL}" -o /tmp/preview-index.html; then
+              if grep -q '<div id="root">' /tmp/preview-index.html; then
+                echo "HEALTHY ${URL} (attempt $i)"
+                exit 0
+              fi
+            fi
+            echo "not ready yet (attempt $i), retrying…"
+            sleep 6
+          done
+          echo "Preview did not become healthy after retries"
+          exit 1

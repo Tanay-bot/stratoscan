@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Stratoscan backend — Fly.io config (always-on single machine)
+#
+# Why always-on: the in-process scheduler (cache warmer, news refresh,
+# job monitor heartbeat) runs inside the API process (src/main.py).
+# auto_stop_machines = "off" keeps the machine running 24/7 so scheduled
+# jobs never sleep — run exactly ONE machine (don't scale to multiple
+# instances or the scheduler jobs will duplicate).
+#
+# Deploy:  fly launch --no-deploy   (first time, then fill secrets)
+#          fly secrets set ...      (all env vars — see DEPLOY.md)
+#          fly deploy
+# ─────────────────────────────────────────────────────────────────────────────
+app = "stratoscan-api"
+primary_region = "iad"
+kill_signal = "SIGINT"
+kill_timeout = 5
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Real values come from `fly secrets set` — never commit secrets.
+  RATE_LIMIT_ENABLED = "true"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"   # keep the scheduler alive 24/7
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "20s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
+# 256MB shared VM ≈ $2–3/mo. If the yfinance/LLM jobs OOM during the
+# nightly warm cycle, bump to 512mb (≈ $4–5/mo):
+# [[vm]]
+#   cpu_kind = "shared"
+#   cpus = 1
+#   memory = "512mb"

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0f" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Stratoscan — Bridge from idea to candidate list. Turn plain-English investing ideas into ranked, backtested stock lists."
+    />
+
+    <!-- Canonical + robots (defaults; Seo.tsx refines per route).
+         %VITE_SITE_URL% is replaced at build time by Vite from the env var
+         (see .env.production / .env.example). -->
+    <link rel="canonical" href="%VITE_SITE_URL%/" />
+    <meta name="robots" content="index, follow" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="Stratoscan — Bridge from idea to candidate list" />
+    <meta
+      property="og:description"
+      content="Turn plain-English investing ideas into ranked, backtested stock lists. Stratoscan screens the market for you — no spreadsheet required."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="%VITE_SITE_URL%/" />
+    <meta property="og:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta property="og:site_name" content="Stratoscan" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Stratoscan — Bridge from idea to candidate list" />
+    <meta
+      name="twitter:description"
+      content="Turn plain-English investing ideas into ranked, backtested stock lists. No spreadsheet required."
+    />
+    <meta name="twitter:image" content="%VITE_SITE_URL%/og-image.png" />
+    <meta name="twitter:site" content="@stratoscan" />
+
+    <title>Stratoscan — Bridge from idea to candidate list</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+# ── Freebuff desktop workspace (local conversation DBs — never commit) ──
+.freebuff/
+
+# ── macOS ──────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Local process artifacts ────────────────────────────────────────────
+*.pid
+
+# ── Logs ───────────────────────────────────────────────────────────────
+*.log
+*.port

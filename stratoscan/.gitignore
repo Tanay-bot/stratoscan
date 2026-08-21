@@ -1,0 +1,27 @@
+# ── Secrets ──────────────────────────────────────────────────────────
+.env
+staging.env
+
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+.pytest_cache/
+
+# ── Data ─────────────────────────────────────────────────────────────
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# ── IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Release-gate markdown report (generated — never commit)
+release-gate-report.md

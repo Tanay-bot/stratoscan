@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Stratoscan frontend — Cloudflare Pages config
+#
+# Deploy (CLI):  npx wrangler pages deploy dist --project-name stratoscan
+# or connect the GitHub repo in the Pages dashboard (auto-builds on push).
+#
+# Build-time env vars (VITE_API_URL, VITE_SENTRY_DSN, VITE_DEMO_MODE) are set
+# in the Pages dashboard: Settings → Environment variables → Production.
+# (Vite bakes VITE_* values into the bundle at build time, so they MUST be
+# set as build/CI env vars — `wrangler pages secret` is for runtime secrets,
+# which a static SPA has none of.)
+# ─────────────────────────────────────────────────────────────────────────────
+name = "stratoscan"
+compatibility_date = "2026-08-03"
+pages_build_output_dir = "dist"
+
+[build]
+command = "npm run build"

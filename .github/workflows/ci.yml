@@ -1,0 +1,80 @@
+# Stratoscan backend accuracy gate — the "prove it" CI lock.
+#
+# Three other workflows already exist; this one covers what they DON'T:
+#   - frontend-ci.yml  → typecheck / lint / format / test / build (frontend/)
+#   - deploy.yml       → runs EVERY tests/test_*.py suite + py_compile on push
+#                        to main (its gate globs tests/, so the golden set and
+#                        backtester suites already run there before deploy)
+#   - frontend-deploy.yml → frontend build + Fly static deploy
+#
+# This gate adds the ACCURACY locks that deploy's suite-glob can't express:
+#   1. ruff          — static lint gate (E/F/W, configured in pyproject.toml)
+#   2. golden set    — frozen expected values; ANY engine-math change moves a
+#                      number and fails loudly (tests/test_backtest_golden.py)
+#   3. ground truth  — verify_backtest_accuracy.py (hand-computed fills/PnL/
+#                      Sharpe/DD/benchmark) + verify_trade_pnl.py (cash P&L)
+#   4. backtester    — the 7 hermetic backtester/API suites, listed explicitly
+#
+# Runs on every push/PR touching the backend, so a regression is caught at
+# the PR, not at the deploy gate.
+
+name: Backend accuracy gate
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'stratoscan/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'stratoscan/**'
+      - '.github/workflows/ci.yml'
+
+defaults:
+  run:
+    working-directory: stratoscan
+
+jobs:
+  accuracy:
+    name: Ruff · Golden set · Ground truth · Backtester suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Frozen golden set (simulation accuracy gate)
+        run: python -m tests.test_backtest_golden
+
+      - name: Backtest accuracy — hand-computed ground truth
+        run: python verify_backtest_accuracy.py
+
+      - name: Trade P&L verification — cash vs reported
+        run: python verify_trade_pnl.py
+
+      - name: Backtester + API hermetic suites
+        run: |
+          set -euo pipefail
+          for t in \
+            tests.test_backtester \
+            tests.test_backtest_fillin \
+            tests.test_backtest_tier4 \
+            tests.test_backtest_db \
+            tests.test_backtest_portfolio \
+            tests.test_api_dirty_data; do
+            echo "=== $t ==="
+            python -m "$t"
+          done
+          echo "✅ ALL BACKTESTER SUITES PASSED"

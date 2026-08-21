@@ -1,0 +1,93 @@
+[build-system]
+# >=77: the metadata below uses PEP 639 (SPDX license expression +
+# license-files), which landed in setuptools 77. An older floor would
+# silently mis-handle those keys under --no-build-isolation builds.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stratoscan"
+version = "0.1.0"
+description = "AI-powered stock screener and backtesting platform. Not a stock-picking service — a bridge from idea to candidate list."
+readme = "README.md"
+requires-python = ">=3.10"
+# PEP 639: the license field must be a valid SPDX expression. Plain
+# "Proprietary" is NOT an SPDX identifier (setuptools >=77 rejects it at
+# build time), so use the standard LicenseRef syntax for closed-source.
+license = "LicenseRef-Proprietary"
+license-files = []
+authors = [{ name = "Stratoscan" }]
+keywords = ["stocks", "screener", "backtesting", "finance", "ai", "fastapi"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Framework :: FastAPI",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+# Ranges mirror requirements.txt — the exact frozen set lives in
+# requirements-lock.txt (generated from requirements.in via pip-tools).
+dependencies = [
+    "pandas>=2.0,<4.0",
+    "numpy>=1.26,<3.0",
+    "finnhub-python>=2.4,<3.0",
+    "openai>=2.0,<3.0",
+    "yfinance>=1.0,<2.0",
+    "psycopg2-binary>=2.9,<3.0",
+    "schedule>=1.0,<2.0",
+    "python-dotenv>=1.0,<2.0",
+    "requests>=2.28,<3.0",
+    "typing-extensions>=4.0,<5.0",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.0,<3.0",
+    "fastapi>=0.110,<1.0",
+    "uvicorn[standard]>=0.27,<1.0",
+    "slowapi>=0.1.10,<0.2",
+    "alembic>=1.13,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0,<9.0",
+    "pytest-mock>=3.10,<4.0",
+    "ruff>=0.5,<1.0",
+]
+
+[project.scripts]
+stratoscan = "src.main:main"
+
+[tool.setuptools]
+packages = ["src"]
+package-dir = { "" = "." }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+# Lint gate (Tier 2 ops): ruff is the single-source static check for the
+# project. CI runs `ruff check .` + `ruff format --check .`. Kept to the
+# default E/F/W rule set so the gate catches real defects (unused imports,
+# undefined names, common bugs) without bikeshedding style.
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    # Docstring URLs and SQL strings legitimately exceed 100 chars —
+    # wrapping them hurts readability more than it helps.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic migration files are generated/mechanical.
+"alembic/versions/*.py" = ["E501"]
+# The hermetic test suites deliberately import the module under test
+# mid-file (after section headers/prints) so each suite stands alone.
+# E402 is intentional there; E501 allows long SQL/docstring lines.
+"tests/*.py" = ["E402", "E501"]
+# test_imports.py is an import-smoke test: its entire purpose is
+# importing every public symbol and asserting it exists. The imports
+# ARE the assertions, so F401 (unused import) is a false positive here.
+"tests/test_imports.py" = ["E402", "E501", "F401"]
+# Long-running behavioral probes at repo root use the same hermetic style.
+"verify_*.py" = ["E402", "E501"]

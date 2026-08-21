@@ -1,0 +1,23 @@
+# Stratoscan — runtime dependencies pinned to the EXACT versions that pass
+# the full test suite (Python 3.14). This file is the input to pip-tools:
+#
+#     pip-compile --generate-hashes requirements.in -o requirements-lock.txt
+#
+# It is kept in sync with the loose ranges in requirements.txt / pyproject.toml;
+# requirements-lock.txt is what production actually installs (hashes enforced).
+
+pandas==3.0.5
+numpy==2.5.1
+finnhub-python==2.4.29
+openai==2.51.0
+yfinance==1.5.2
+psycopg2-binary==2.9.12
+schedule==1.2.2
+python-dotenv==1.2.2
+requests==2.34.2
+typing-extensions==4.16.0
+pydantic==2.13.4
+pydantic-settings==2.14.2
+fastapi==0.141.1
+uvicorn[standard]==0.52.0
+alembic==1.18.5

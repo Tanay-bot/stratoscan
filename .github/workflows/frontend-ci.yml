@@ -1,0 +1,63 @@
+# Stratoscan frontend CI — production gate for the React + Vite app.
+#
+# Every push/PR to the frontend runs the same checks a human runs before
+# merging, in dependency order:
+#   1. typecheck — tsc -b (strict TS, catches type drift)
+#   2. lint      — eslint (react-hooks + jsx-a11y, flat config)
+#   3. format    — prettier --check (enforced style)
+#   4. test      — vitest (unit + component suite)
+#   5. build     — production build (also runs the demo-mode guard, so
+#                  VITE_DEMO_MODE=true can never ship)
+#
+# No secrets are needed: the suite is hermetic (no network, no backend).
+# The e2e harnesses (verify_behavior.mjs / verify_live.mjs) need a live
+# dev server + backend, so they run locally via `npm run verify:*`, not CI.
+
+name: Frontend CI
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['frontend/**', '.github/workflows/frontend-ci.yml']
+  pull_request:
+    paths: ['frontend/**', '.github/workflows/frontend-ci.yml']
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  gate:
+    name: Typecheck · Lint · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build (production — demo-mode guard active)
+        run: npm run build
+        env:
+          VITE_API_URL: https://stratoscan-api.fly.dev
+          VITE_SENTRY_DSN: ''
+          VITE_DEMO_MODE: 'false'

@@ -1,0 +1,7 @@
+# Stratoscan — robots.txt
+# All crawlers welcome. Sitemap points search engines at the full page list.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://stratoscan.com/sitemap.xml

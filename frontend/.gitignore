@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+!.env.production
+npm-debug.log*
+.DS_Store
+
+# Build artifacts (tsc -b emits these next to each tsconfig)
+*.tsbuildinfo
+
+# Headless pixel captures (scripts/capture.mjs)
+.captures/

@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Stratoscan backend — STAGING Fly.io config (always-on single machine)
+#
+# Mirrors fly.toml (production) but deploys as a SEPARATE app so staging
+# never shares a machine or scheduler with prod. Real secrets come from
+# `fly secrets set` (see STAGING.md) — never commit them.
+#
+# First deploy:
+#   fly apps create stratoscan-staging
+#   fly secrets set --app stratoscan-staging \
+#     DATABASE_URL=... FINNHUB_KEY_01=... LLM_PROVIDERS=... JWT_SECRET=... \
+#     NEWS_DATABASE_URL=... BACKTEST_DATABASE_URL=... RATE_LIMIT_ENABLED=false
+#   fly deploy -c fly.staging.toml
+# ─────────────────────────────────────────────────────────────────────────────
+app = "stratoscan-staging"
+primary_region = "iad"
+kill_signal = "SIGINT"
+kill_timeout = 5
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Real values come from `fly secrets set` — never commit secrets.
+  # Rate limiter OFF on staging so E2E tests and release-gate probes never
+  # trip 429s (same as the local staging.env).
+  RATE_LIMIT_ENABLED = "false"
+  REDIS_RATE_LIMIT_ENABLED = "false"
+  APP_ENV = "staging"
+  # The Dockerfile entrypoint starts the API on the standard 8000 (the
+  # image is shared with production — see fly.toml). The staging
+  # `run_staging.py --port 8010` is for LOCAL runs only; a Fly container
+  # must keep internal_port = 8000 or the /health gate hits a dead port.
+  PORT = "8000"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"   # keep the scheduler alive 24/7
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "20s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
+# 256MB shared VM ≈ $2–3/mo — same sizing rationale as fly.toml.
+# [[vm]]
+#   cpu_kind = "shared"
+#   cpus = 1
+#   memory = "256mb"

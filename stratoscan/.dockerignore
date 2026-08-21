@@ -1,0 +1,20 @@
+# ── Secrets ──────────────────────────────────────────────────────────
+.env
+.env.*
+!*.example
+
+# ── VCS / tooling ────────────────────────────────────────────────────
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ── Data / tests (not needed at runtime) ─────────────────────────────
+data/
+tests/
+*.db
+*.db-wal
+*.db-shm
+.pytest_cache/
