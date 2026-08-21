@@ -135,6 +135,11 @@ class BacktestResult:
     buy_hold_total_return: Optional[float] = None  # decimal
     dividend_contribution: Optional[float] = None  # decimal
     data_quality: List[str] = field(default_factory=list)
+    # Per-symbol data freshness from the screener (None = compare-mode or
+    # unknown). Rendered by the frontend as a DataAgeBadge next to the
+    # symbol tab, matching the screener's staleness indicator.
+    data_age_minutes: Optional[float] = None
+    is_stale: bool = False
 
     # Tier 5 portfolio + cash accounting. full_equity_curve is the FULL-
     # resolution (daily) equity series — the portfolio aggregator needs
@@ -2427,6 +2432,8 @@ class BacktestEngine:
 
         self._last_screen_message = None
         self._last_fill_note = None
+        self._screen_data_age: Dict[str, Optional[float]] = {}
+        self._screen_is_stale: Dict[str, bool] = {}
 
         # Tier 3 compare mode: an explicit symbol set skips the screener
         # entirely — the caller (API) already picked the symbols from a
@@ -2466,6 +2473,18 @@ class BacktestEngine:
         dq = getattr(screening, "data_quality", None)
         self._last_screen_message = getattr(dq, "get", lambda k, d=None: d)("message")
         symbols = [r.symbol for r in getattr(screening, "results", [])]
+
+        # Capture per-symbol data-age from screener so the API can surface
+        # staleness badges on the backtest results tab (same signal the
+        # screener renders via DataAgeBadge).
+        self._screen_data_age: Dict[str, Optional[float]] = {
+            r.symbol: getattr(r, "data_age_minutes", None)
+            for r in getattr(screening, "results", [])
+        }
+        self._screen_is_stale: Dict[str, bool] = {
+            r.symbol: getattr(r, "is_stale", False)
+            for r in getattr(screening, "results", [])
+        }
 
         # Tier 5: sector diversification. Walk candidates in rank order,
         # accept at most ``max_sector_exposure`` per sector; a symbol whose
@@ -2541,5 +2560,11 @@ class BacktestEngine:
                 "Candidate fill-in: %d top candidates lacked data for '%s'",
                 filled_from, interpreted.raw_input,
             )
+
+        # Inject per-symbol data-age from the screener into each result
+        # so the API can surface DataAgeBadge on the backtest tab.
+        for sym, bt in results.items():
+            bt.data_age_minutes = self._screen_data_age.get(sym)
+            bt.is_stale = self._screen_is_stale.get(sym, False)
 
         return results

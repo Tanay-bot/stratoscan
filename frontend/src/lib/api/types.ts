@@ -170,6 +170,9 @@ export interface BacktestResultItem {
   confidence_intervals?: ConfidenceIntervalsResult | null
   walk_forward?: WalkForwardResult | null
   parameter_sensitivity?: ParameterSensitivityResult | null
+  /** Per-symbol data freshness from the screener (null = compare-mode or unknown). */
+  data_age_minutes?: number | null
+  is_stale?: boolean
 }
 
 /** Tier 3 robustness: trade-sequence bootstrap percentiles (fixed seed). */

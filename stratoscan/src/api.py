@@ -682,6 +682,10 @@ class BacktestResultItem(BaseModel):
     confidence_intervals: Optional[Dict[str, Any]] = None
     walk_forward: Optional[Dict[str, Any]] = None
     parameter_sensitivity: Optional[Dict[str, Any]] = None
+    # Per-symbol data freshness from the screener — mirrors StockResult's
+    # DataAgeBadge so the backtest tab can show staleness per symbol.
+    data_age_minutes: Optional[float] = None
+    is_stale: bool = False
 
 
 class BacktestResponse(BaseModel):
@@ -2551,6 +2555,8 @@ def _build_backtest_response(
             confidence_intervals=bt_result.confidence_intervals,
             walk_forward=bt_result.walk_forward,
             parameter_sensitivity=bt_result.parameter_sensitivity,
+            data_age_minutes=bt_result.data_age_minutes,
+            is_stale=bt_result.is_stale,
         )
 
     message = None

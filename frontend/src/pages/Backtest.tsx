@@ -876,7 +876,14 @@ export function Backtest() {
                       : 'border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.05]',
                   ].join(' ')}
                 >
-                  <span className="font-mono text-sm font-bold text-text-hi">{r.symbol}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-sm font-bold text-text-hi">{r.symbol}</span>
+                    {r.is_stale && (
+                      <span className="rounded-full bg-amber-400/[0.12] px-1.5 py-0.5 text-[9px] font-medium text-amber-300 ring-1 ring-inset ring-amber-400/30">
+                        Stale
+                      </span>
+                    )}
+                  </div>
                   <span
                     className={`font-mono text-xs tabular ${(r.total_return_pct ?? 0) >= 0 ? 'text-gain-soft' : 'text-loss-soft'}`}
                   >
