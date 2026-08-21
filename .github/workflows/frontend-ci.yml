@@ -55,6 +55,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Walk-forward scale guard
+        run: node scripts/verify_walkforward_scale.mjs
+
       - name: Build (production — demo-mode guard active)
         run: npm run build
         env:
