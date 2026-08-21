@@ -1050,6 +1050,9 @@ export function Backtest() {
       tuneOpen={tuneOpen}
       onToggleTune={() => setTuneOpen((v) => !v)}
       tune={tunePanel}
+      // buildRequest prepends ~100 chars of strategy params; cap the
+      // user's raw input so the final query stays under 4000.
+      maxLength={4000 - 100}
     />
   )
 

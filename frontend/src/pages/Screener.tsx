@@ -163,11 +163,22 @@ export function Screener() {
           ref={searchRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          maxLength={4000}
           placeholder="e.g. undervalued small-cap tech stocks with rising momentum"
           aria-label="Screen query"
           className="h-11 min-w-0 flex-1 bg-transparent text-sm text-text-hi placeholder:text-text-low focus:outline-none"
           spellCheck={false}
         />
+        {draft.length > 3200 && (
+          <span
+            className={cn(
+              'shrink-0 font-mono text-2xs tabular',
+              draft.length >= 4000 ? 'text-loss-soft' : 'text-amber-300',
+            )}
+          >
+            {draft.length}/4k
+          </span>
+        )}
         <Button type="submit" loading={loading && !data} disabled={pending}>
           {pending ? (
             `Please wait ${waitSeconds}s`

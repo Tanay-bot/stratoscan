@@ -25,6 +25,7 @@ export function ChatPanel({
   tuneOpen,
   onToggleTune,
   tune,
+  maxLength = 4000,
 }: {
   messages: ChatMessage[]
   loading: boolean
@@ -32,6 +33,8 @@ export function ChatPanel({
   tuneOpen: boolean
   onToggleTune: () => void
   tune: React.ReactNode
+  /** Backend query max_length minus any overhead the parent adds. */
+  maxLength?: number
 }) {
   const [draft, setDraft] = useState('')
   const { pending, waitSeconds } = useRateLimitCountdown()
@@ -198,6 +201,7 @@ export function ChatPanel({
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            maxLength={maxLength}
             placeholder="e.g. buy oversold tech stocks…"
             aria-label="Strategy message"
             spellCheck={false}
@@ -212,6 +216,16 @@ export function ChatPanel({
             <Send className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
+        {draft.length > maxLength * 0.8 && (
+          <p
+            className={cn(
+              'mt-1 px-1 font-mono text-2xs tabular',
+              draft.length >= maxLength ? 'text-loss-soft' : 'text-amber-300',
+            )}
+          >
+            {draft.length} / {maxLength}
+          </p>
+        )}
         {pending && (
           <p
             role="status"
