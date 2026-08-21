@@ -39,22 +39,15 @@ defaults:
   run:
     working-directory: frontend
 
-env:
-  # Build values for the LOCAL gate build — mirrors frontend-ci.yml so the
-  # gated artifact is identical to what CI verifies. NOTE: Vercel rebuilds the
-  # app server-side on deploy; the DEPLOYED build reads its env from the Vercel
-  # project environment (Production/Preview scopes), NOT from this block. Set
-  # the same vars there (see README → Vercel deployment).
-  VITE_API_URL: ${{ secrets.VITE_API_URL }}
-  VITE_SITE_URL: ${{ secrets.VITE_SITE_URL }}
-  VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
-  VITE_RELEASE_VERSION: ${{ github.sha }}
-  VITE_DEMO_MODE: 'false'
-  # SENTRY_AUTH_TOKEN is scoped to main-push builds only — PR gate runs must
-  # not upload sourcemaps to Sentry (pollutes the release feed + rate limits).
-  SENTRY_AUTH_TOKEN: ${{ github.ref == 'refs/heads/main' && secrets.SENTRY_AUTH_TOKEN || '' }}
-  SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-  SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+# NOTE: no workflow-level env block here. The gate job must run EXACTLY like
+# frontend-ci.yml (its typecheck/lint/test/build fall back to the committed
+# frontend/.env.production) — injecting secrets-derived env at workflow level
+# makes empty, not-yet-configured secrets leak into the test environment as
+# empty strings and fail the SEO canonical-origin tests. The deploy/preview
+# jobs reference their secrets inline (vercel-action inputs, --build-env args,
+# healthcheck URL), and Vercel rebuilds the app server-side anyway, so the
+# DEPLOYED build reads its env from the Vercel project environment (see
+# README → Vercel deployment).
 
 jobs:
   gate:
