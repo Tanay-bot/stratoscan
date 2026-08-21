@@ -41,6 +41,7 @@ routes = set(
 )
 expected = {
     "/health", "/config", "/screen", "/screen/export", "/interpret", "/backtest", "/backtest/export", "/enrich",
+    "/backtest/async", "/backtest/async/{job_id}",
     "/stocks", "/stocks/{symbol}", "/refresh", "/news", "/news/{symbol}",
     "/auth/register", "/auth/login", "/auth/me",
     "/auth/verify-email", "/auth/resend-verification",

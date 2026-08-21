@@ -35,7 +35,6 @@ from typing import Any, Dict, List
 sys.path.insert(0, ".")
 
 from dotenv import load_dotenv  # noqa: E402
-import psycopg2  # noqa: E402
 from psycopg2.extras import RealDictCursor, execute_values  # noqa: E402
 
 from seed_staging import _connect, _create_schema  # noqa: E402

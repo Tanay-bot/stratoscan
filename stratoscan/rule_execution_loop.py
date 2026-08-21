@@ -34,7 +34,6 @@ Exit: 0 = all checks passed; 1 = failures present.
 
 from __future__ import annotations
 
-import math
 import os
 import sys
 import time
@@ -283,8 +282,6 @@ def reference_run_backtest(
                 trades.append(open_trade)
                 open_trade = None
                 shares = 0
-
-        current_price = float(row["Close"])
 
         # 3) Signals evaluated at THIS close, filled NEXT bar's open.
         if shares == 0 and cash > 0:
@@ -663,7 +660,6 @@ def _verify_trade(q, sym, t, prepped, rules, window_start, window_end):
     buy_date = str(t.get("buy_date"))
     sell_date = t.get("sell_date")
     reason = t.get("exit_reason")
-    fee = float(rules.get("fee_rate") or 0.0)
     slip = float(rules.get("slippage") or 0.0)
 
     if buy_date not in prepped.index.strftime("%Y-%m-%d"):
@@ -694,7 +690,7 @@ def _verify_trade(q, sym, t, prepped, rules, window_start, window_end):
     # 2) Fill price must equal next-open +/- slippage (no look-ahead).
     exp_fill = float(row["Open"]) * (1 - slip if is_short else 1 + slip)
     got = float(t.get("buy_price"))
-    _check(f"{q} [{sym}] {'short entry' if is_short else 'buy'} fill = next open {"- slippage" if is_short else "+ slippage"}",
+    _check(           f"{q} [{sym}] {'short entry' if is_short else 'buy'} fill = next open {'- slippage' if is_short else '+ slippage'}",
            abs(exp_fill - got) < 0.05,
            f"(expect {exp_fill:.2f} got {got:.2f})")
 
@@ -721,7 +717,7 @@ def _verify_trade(q, sym, t, prepped, rules, window_start, window_end):
                f"(prior close {prior['Close']:.2f} rules={exit_rules} side={t.get('side')})")
         exp_fill = float(srow["Open"]) * (1 + slip if is_short else 1 - slip)
         got = float(t.get("sell_price"))
-        _check(f"{q} [{sym}] {'short cover' if is_short else 'signal sell'} fill = next open {"+ slippage" if is_short else "- slippage"}",
+        _check(f"{q} [{sym}] {'short cover' if is_short else 'signal sell'} fill = next open {'+ slippage' if is_short else '- slippage'}",
                abs(exp_fill - got) < 0.05,
                f"(expect {exp_fill:.2f} got {got:.2f})")
     elif reason == "stop_loss":

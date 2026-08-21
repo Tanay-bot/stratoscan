@@ -2660,7 +2660,6 @@ async def backtest_async(
     """
     # Validate the request up-front (same checks /backtest runs) so a 422
     # is returned instantly instead of after minutes of compute.
-    from src.interpreter import interpret_query
 
     job_id = f"bt_{uuid.uuid4().hex[:12]}"
     job: Dict[str, Any] = {

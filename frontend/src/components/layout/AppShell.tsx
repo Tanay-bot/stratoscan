@@ -41,7 +41,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <NavLink to="/" aria-label="Stratoscan home">
           <Logo />
         </NavLink>
-      </div>          <nav className="flex-1 space-y-1 px-3" aria-label="Primary">
+      </div>{' '}
+      <nav className="flex-1 space-y-1 px-3" aria-label="Primary">
         {NAV.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
@@ -85,7 +86,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             aria-label="Open admin dashboard (new tab)"
             className="group mt-1 flex items-center gap-3 rounded-xl border border-white/[0.06] bg-neon/[0.06] px-3.5 py-2.5 text-sm font-medium text-neon transition-all duration-200 hover:bg-neon/[0.12] hover:text-neon"
           >
-            <ShieldCheck className="h-[18px] w-[18px] text-neon/80 group-hover:text-neon" aria-hidden="true" />
+            <ShieldCheck
+              className="h-[18px] w-[18px] text-neon/80 group-hover:text-neon"
+              aria-hidden="true"
+            />
             <span>Admin</span>
             <span
               className="ml-auto text-2xs font-semibold uppercase tracking-wider text-neon/60 group-hover:text-neon"
@@ -96,7 +100,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           </a>
         )}
       </nav>
-
       <div className="p-3">
         <div className="glass mb-2 rounded-xl p-3.5">
           <p className="text-2xs font-semibold uppercase tracking-wider text-text-low">Plan</p>

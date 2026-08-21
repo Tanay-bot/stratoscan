@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -104,7 +103,7 @@ def main() -> int:
 
         # Fast path: force tiny backoff by monkeypatching time.sleep inside the
         # retry loop — we only assert THAT retries happen, not the wall-clock.
-        with mock.patch("src.data_fetcher.time.sleep") as m_sleep:
+        with mock.patch("src.data_fetcher.time.sleep") as _m_sleep:
             try:
                 _api_call_with_retry(_RateLimited(), max_retries=2, base_delay=0.001)
             except RuntimeError:

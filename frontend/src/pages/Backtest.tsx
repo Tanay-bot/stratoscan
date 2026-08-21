@@ -94,8 +94,7 @@ function parseParams(sp: URLSearchParams) {
     startDate: sp.get('start') ?? '',
     endDate: sp.get('end') ?? '',
     allocation: (sp.get('allocation') as 'equal' | 'risk_based') ?? 'equal',
-    rebalance:
-      (sp.get('rebalance') as 'none' | 'monthly' | 'quarterly' | 'yearly') ?? 'none',
+    rebalance: (sp.get('rebalance') as 'none' | 'monthly' | 'quarterly' | 'yearly') ?? 'none',
     reinvest: sp.get('reinvest') === 'true',
     borrow: n('borrow', 0),
     sector: n('sector', 0),
@@ -141,9 +140,7 @@ export function Backtest() {
   // pick has no usable price history). More stocks = longer runs.
   const [topN, setTopN] = useState(5)
   // Tier 5 portfolio: shared pool + allocation + rebalance schedule
-  const [portfolioAllocation, setPortfolioAllocation] = useState<
-    'equal' | 'risk_based'
-  >('equal')
+  const [portfolioAllocation, setPortfolioAllocation] = useState<'equal' | 'risk_based'>('equal')
   const [rebalanceFrequency, setRebalanceFrequency] = useState<
     'none' | 'monthly' | 'quarterly' | 'yearly'
   >('none')
@@ -459,7 +456,11 @@ export function Backtest() {
             <label htmlFor="reinvest" className="text-xs text-text-mid">
               Reinvest cash dividends
             </label>
-            <Switch id="reinvest" checked={dividendReinvest} onCheckedChange={setDividendReinvest} />
+            <Switch
+              id="reinvest"
+              checked={dividendReinvest}
+              onCheckedChange={setDividendReinvest}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -669,7 +670,6 @@ export function Backtest() {
           />
         </div>
       )}
-
       {loading && !result && !jobStatus && (
         <div className="space-y-3">
           <p className="text-sm text-text-low">
@@ -687,7 +687,6 @@ export function Backtest() {
           <Skeleton className="h-40 w-full rounded-2xl" />
         </div>
       )}
-
       {/* Tier 3: live per-symbol progress while the async job runs */}
       {loading && jobStatus && jobStatus.status !== 'done' && (
         <motion.div
@@ -738,7 +737,6 @@ export function Backtest() {
           </div>
         </motion.div>
       )}
-
       {error && !result && (
         <EmptyState
           icon={AlertTriangle}
@@ -751,7 +749,6 @@ export function Backtest() {
           }
         />
       )}
-
       {result && result.total_symbols_tested === 0 && (
         <EmptyState
           icon={SearchX}
@@ -762,7 +759,8 @@ export function Backtest() {
           }
           className="w-full"
         />
-      )}          {result && result.total_symbols_tested > 0 && (
+      )}{' '}
+      {result && result.total_symbols_tested > 0 && (
         <>
           {/* Tier 3 compare mode: baseline pinned, this run is the challenger */}
           {baseline && (
@@ -811,7 +809,10 @@ export function Backtest() {
                       key={note}
                       className="flex items-start gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-2xs leading-relaxed text-text-low"
                     >
-                      <ShieldAlert className="mt-0.5 h-3 w-3 shrink-0 text-text-low" aria-hidden="true" />
+                      <ShieldAlert
+                        className="mt-0.5 h-3 w-3 shrink-0 text-text-low"
+                        aria-hidden="true"
+                      />
                       {note}
                     </p>
                   ))}
@@ -820,16 +821,17 @@ export function Backtest() {
             </motion.div>
           )}
 
-          {active && (active.monte_carlo || active.walk_forward || active.parameter_sensitivity) && (
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.04, ease: [0.16, 1, 0.3, 1] }}
-              className="glass rounded-2xl p-4"
-            >
-              <Robustness item={active} />
-            </motion.div>
-          )}
+          {active &&
+            (active.monte_carlo || active.walk_forward || active.parameter_sensitivity) && (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.04, ease: [0.16, 1, 0.3, 1] }}
+                className="glass rounded-2xl p-4"
+              >
+                <Robustness item={active} />
+              </motion.div>
+            )}
 
           {result.portfolio && result.portfolio.equity_curve.length > 0 && (
             <motion.div
@@ -840,12 +842,12 @@ export function Backtest() {
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <span className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-text-low">
-                  <PieChart className="h-3.5 w-3.5 text-neon" aria-hidden="true" /> Combined portfolio
-                  ({result.portfolio.symbols.length} symbols)
+                  <PieChart className="h-3.5 w-3.5 text-neon" aria-hidden="true" /> Combined
+                  portfolio ({result.portfolio.symbols.length} symbols)
                 </span>
                 <Badge variant="neutral" className="text-[11px] normal-case">
-                  {result.portfolio.allocation === 'equal' ? 'Equal weight' : 'Risk-based'} · rebalance{' '}
-                  {result.portfolio.rebalance}
+                  {result.portfolio.allocation === 'equal' ? 'Equal weight' : 'Risk-based'} ·
+                  rebalance {result.portfolio.rebalance}
                 </Badge>
               </div>
               <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -877,12 +879,14 @@ export function Backtest() {
                 </div>
               </div>
               <EquityCurve
-                item={{
-                  symbol: 'PORTFOLIO',
-                  equity_curve: result.portfolio.equity_curve,
-                  drawdown_curve: result.portfolio.drawdown_curve ?? [],
-                  total_return_pct: result.portfolio.total_return_pct,
-                } as unknown as BacktestResultItem}
+                item={
+                  {
+                    symbol: 'PORTFOLIO',
+                    equity_curve: result.portfolio.equity_curve,
+                    drawdown_curve: result.portfolio.drawdown_curve ?? [],
+                    total_return_pct: result.portfolio.total_return_pct,
+                  } as unknown as BacktestResultItem
+                }
                 showBenchmark={false}
                 height={240}
               />
@@ -1026,7 +1030,10 @@ export function Backtest() {
                 size="sm"
                 onClick={() => {
                   setBaseline(result)
-                  toast.success('Baseline set', 'Run another strategy to compare against this one on the same symbol set.')
+                  toast.success(
+                    'Baseline set',
+                    'Run another strategy to compare against this one on the same symbol set.',
+                  )
                 }}
                 disabled={!result || loading}
               >

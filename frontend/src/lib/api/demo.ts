@@ -1159,7 +1159,8 @@ export function demoBacktest(req: BacktestRequest): BacktestResponse {
         sharpe_ci: [round2(sharpe - 0.45), round2(sharpe + 0.45)],
         max_drawdown_ci: [round2(maxDD - 6), round2(maxDD + 3)],
         sharpe_t_stat: round2(sharpe * 1.4),
-        sharpe_sample_note: '500 daily observations — a Sharpe t-stat below ~2 means the edge is not statistically distinguishable from noise.',
+        sharpe_sample_note:
+          '500 daily observations — a Sharpe t-stat below ~2 means the edge is not statistically distinguishable from noise.',
       },
       walk_forward: {
         available: true,

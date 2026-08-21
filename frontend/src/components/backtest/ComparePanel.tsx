@@ -73,8 +73,9 @@ export function ComparePanel({
   const chalSeries = useMemo(() => toReturnSeries(equitySeries(challenger)), [challenger])
 
   const combined = useMemo(() => {
-    const dates = [...new Set([...baseSeries.map((p) => p.date), ...chalSeries.map((p) => p.date)])]
-      .sort()
+    const dates = [
+      ...new Set([...baseSeries.map((p) => p.date), ...chalSeries.map((p) => p.date)]),
+    ].sort()
     const baseMap = new Map(baseSeries.map((p) => [p.date, p.value]))
     const chalMap = new Map(chalSeries.map((p) => [p.date, p.value]))
     return dates.map((date) => ({
@@ -87,11 +88,41 @@ export function ComparePanel({
   const { ref, width } = useContainerWidth<HTMLDivElement>()
 
   const rows = [
-    { label: 'Total return', base: metric(baseline, pickReturn), chal: metric(challenger, pickReturn), fmt: (v: number) => fmtPct(v), better: 'higher' },
-    { label: 'Sharpe ratio', base: metric(baseline, pickSharpe), chal: metric(challenger, pickSharpe), fmt: (v: number) => v.toFixed(2), better: 'higher' },
-    { label: 'Max drawdown', base: metric(baseline, pickMaxDD), chal: metric(challenger, pickMaxDD), fmt: (v: number) => fmtPct(v), better: 'higher' },
-    { label: 'Win rate', base: metric(baseline, pickWin), chal: metric(challenger, pickWin), fmt: (v: number) => fmtPct(v, 0, false), better: 'higher' },
-    { label: 'Trades', base: metric(baseline, pickTrades), chal: metric(challenger, pickTrades), fmt: (v: number) => String(v), better: '—' },
+    {
+      label: 'Total return',
+      base: metric(baseline, pickReturn),
+      chal: metric(challenger, pickReturn),
+      fmt: (v: number) => fmtPct(v),
+      better: 'higher',
+    },
+    {
+      label: 'Sharpe ratio',
+      base: metric(baseline, pickSharpe),
+      chal: metric(challenger, pickSharpe),
+      fmt: (v: number) => v.toFixed(2),
+      better: 'higher',
+    },
+    {
+      label: 'Max drawdown',
+      base: metric(baseline, pickMaxDD),
+      chal: metric(challenger, pickMaxDD),
+      fmt: (v: number) => fmtPct(v),
+      better: 'higher',
+    },
+    {
+      label: 'Win rate',
+      base: metric(baseline, pickWin),
+      chal: metric(challenger, pickWin),
+      fmt: (v: number) => fmtPct(v, 0, false),
+      better: 'higher',
+    },
+    {
+      label: 'Trades',
+      base: metric(baseline, pickTrades),
+      chal: metric(challenger, pickTrades),
+      fmt: (v: number) => String(v),
+      better: '—',
+    },
   ] as const
 
   const baseTotal = rows[0].base
@@ -142,7 +173,11 @@ export function ComparePanel({
                   <stop offset="100%" stopColor="#a78bfa" stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 6" vertical={false} />
+              <CartesianGrid
+                stroke="rgba(255,255,255,0.05)"
+                strokeDasharray="3 6"
+                vertical={false}
+              />
               <XAxis
                 dataKey="date"
                 tickFormatter={fmtDatePlain}

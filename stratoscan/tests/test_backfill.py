@@ -26,6 +26,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["REDIS_RATE_LIMIT_ENABLED"] = "false"
 
+# Hermetic: point the backfill tool at a dummy backtest DB so its
+# "BACKTEST_DATABASE_URL not set" config guard doesn't fire BEFORE the
+# fake BacktestDB below is even constructed (mirrors test_api_dirty_data's
+# settings redirection). The patched FakeBacktestDB serves every call.
+from src.config import settings  # noqa: E402
+settings.backtest_database_url = "postgresql://ci-dummy-stratoscan"
+
 
 class FakeBacktestDB:
     """Duck-typed stand-in for BacktestDB (the real contract)."""

@@ -18,7 +18,6 @@ renaming this file would break its chain.
 
 from typing import Sequence, Union
 
-from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d5e6f7a8b9c0"

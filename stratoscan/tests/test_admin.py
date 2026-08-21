@@ -32,6 +32,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["REDIS_RATE_LIMIT_ENABLED"] = "false"
 
+# Hermetic: /admin/overview gates its DB gather behind
+# settings.has_database_url BEFORE touching PostgresDB (patched below with
+# FakeAdminDB). On a clean CI runner with no .env that guard 503s first —
+# point database_url at a dummy so the guard passes and the fake serves
+# health/stocks/users (mirrors test_api_dirty_data's settings redirection).
+from src.config import settings  # noqa: E402
+settings.database_url = "postgresql://ci-dummy-stratoscan"
+
 from unittest import mock  # noqa: E402
 
 from src.auth import hash_password  # noqa: E402

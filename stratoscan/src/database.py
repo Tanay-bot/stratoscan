@@ -20,7 +20,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import psycopg2
 import psycopg2.extras
@@ -948,7 +948,6 @@ class PostgresDB:
             saved_screeners: List of {id, query, savedAt} dicts.
             recent_backtests: List of backtest-response dicts + savedAt.
         """
-        import json
 
         sql = """
             INSERT INTO user_data (user_id, watchlist, saved_screeners, recent_backtests)

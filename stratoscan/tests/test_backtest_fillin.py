@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -160,7 +160,6 @@ print(f"✅ both notes set on one engine: {joined!r}")
 print("\nC. _run_backtest_pipeline forwards the note to the endpoint...")
 
 from src.api import _run_backtest_pipeline
-from src.backtester import BacktestEngine as BE
 
 class FakeEngineWithNotes:
     _last_screen_message = "Relaxed 1 filter(s) (volume ≥ 1000000) to show the nearest matches."

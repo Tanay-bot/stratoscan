@@ -11,7 +11,10 @@ import type {
 import { fmtPct } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
-type LucideIcon = React.ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
+type LucideIcon = React.ComponentType<{
+  className?: string
+  'aria-hidden'?: boolean | 'true' | 'false'
+}>
 
 function BlockShell({
   title,
@@ -95,10 +98,7 @@ function MonteCarloBlock({ mc }: { mc: MonteCarloResult }) {
             </p>
             <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.06]">
               <div
-                className={cn(
-                  'h-full rounded-full',
-                  b.v >= 0 ? 'bg-gain' : 'bg-loss',
-                )}
+                className={cn('h-full rounded-full', b.v >= 0 ? 'bg-gain' : 'bg-loss')}
                 style={{ width: `${(Math.abs(b.v) / maxAbs) * 100}%` }}
               />
             </div>
@@ -139,7 +139,11 @@ function ConfidenceBlock({ ci }: { ci: ConfidenceIntervalsResult }) {
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="Sharpe CI" value={`${sLo.toFixed(2)} – ${sHi.toFixed(2)}`} />
-        <Stat label="Max DD CI" value={`${fmtPct(dLo * 100, 1)} – ${fmtPct(dHi * 100, 1)}`} tone="loss" />
+        <Stat
+          label="Max DD CI"
+          value={`${fmtPct(dLo * 100, 1)} – ${fmtPct(dHi * 100, 1)}`}
+          tone="loss"
+        />
         <Stat
           label="Sharpe t-stat"
           value={t != null ? t.toFixed(2) : '—'}
@@ -160,7 +164,9 @@ function ConfidenceBlock({ ci }: { ci: ConfidenceIntervalsResult }) {
           />
         </div>
         <p className="mt-1.5 text-2xs text-text-low">
-          {ci.sharpe_sample_note ?? ''} Sharpe t-stat {sig ? '≥ 2 — edge is statistically' : '< 2 — edge not statistically'} distinguishable from noise.
+          {ci.sharpe_sample_note ?? ''} Sharpe t-stat{' '}
+          {sig ? '≥ 2 — edge is statistically' : '< 2 — edge not statistically'} distinguishable
+          from noise.
         </p>
       </div>
     </div>
@@ -219,9 +225,12 @@ function WalkForwardBlock({ wf }: { wf: WalkForwardResult }) {
         <div className="rounded-lg bg-white/[0.04] px-2.5 py-2">
           <p className="text-2xs uppercase tracking-wider text-text-low">Window range</p>
           <p className="mt-0.5 font-mono text-sm font-bold tabular text-text-hi">
-            {fmtPct((rolling?.min_return ?? 0) * 100, 1)} – {fmtPct((rolling?.max_return ?? 0) * 100, 1)}
+            {fmtPct((rolling?.min_return ?? 0) * 100, 1)} –{' '}
+            {fmtPct((rolling?.max_return ?? 0) * 100, 1)}
           </p>
-          <p className="mt-0.5 text-2xs text-text-low">median {fmtPct((rolling?.median_return ?? 0) * 100, 1)}</p>
+          <p className="mt-0.5 text-2xs text-text-low">
+            median {fmtPct((rolling?.median_return ?? 0) * 100, 1)}
+          </p>
         </div>
       </div>
       {verdict && (
@@ -305,11 +314,12 @@ function SensitivityBlock({ ps }: { ps: ParameterSensitivityResult }) {
         </table>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge
-          variant={overfit_signal ? 'warning' : 'gain'}
-          className="text-[11px] normal-case"
-        >
-          {overfit_signal ? <AlertTriangle className="mr-1 h-3 w-3" aria-hidden="true" /> : <CheckCircle2 className="mr-1 h-3 w-3" aria-hidden="true" />}
+        <Badge variant={overfit_signal ? 'warning' : 'gain'} className="text-[11px] normal-case">
+          {overfit_signal ? (
+            <AlertTriangle className="mr-1 h-3 w-3" aria-hidden="true" />
+          ) : (
+            <CheckCircle2 className="mr-1 h-3 w-3" aria-hidden="true" />
+          )}
           {verdict ?? ''}
         </Badge>
         <span className="text-2xs text-text-low">
@@ -329,9 +339,9 @@ function SensitivityBlock({ ps }: { ps: ParameterSensitivityResult }) {
 export function Robustness({ item }: { item: BacktestResultItem }) {
   const hasAny = Boolean(
     item.monte_carlo ||
-      item.confidence_intervals ||
-      item.walk_forward ||
-      item.parameter_sensitivity,
+    item.confidence_intervals ||
+    item.walk_forward ||
+    item.parameter_sensitivity,
   )
   if (!hasAny) return null
 

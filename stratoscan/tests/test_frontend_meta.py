@@ -167,6 +167,14 @@ class _FakeDB:
         return _FakeConn(self._rows)
 
 
+# Hermetic: the /meta/sectors endpoint checks settings.has_database_url
+# BEFORE touching PostgresDB (which is patched below with _FakeDB). On a
+# clean CI runner with no .env that guard 503s first — point database_url
+# at a dummy so the guard passes and the fake serves the rows. The
+# unconfigured-503 path is asserted separately by patching the property.
+from src.config import settings as meta_settings  # noqa: E402
+meta_settings.database_url = "postgresql://ci-dummy-stratoscan"
+
 with mock.patch("src.database.PostgresDB", _FakeDB):
     r = client.get("/meta/sectors")
     assert r.status_code == 200, f"sectors status {r.status_code}"

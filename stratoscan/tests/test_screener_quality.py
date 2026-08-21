@@ -452,7 +452,7 @@ q12c = InterpretedQuery(raw_input="biotech", filters=[], sector="Biotech")
 r12c = s12.screen(q12c, limit=10)
 assert r12c.total_matches == 0, r12c.total_matches
 assert "relaxed_from" not in r12c.data_quality, r12c.data_quality
-print(f"✅ no relaxable criteria → honest 0 (sector=Biotech has no rows)")
+print("✅ no relaxable criteria → honest 0 (sector=Biotech has no rows)")
 
 # ── 13. Contradiction resolver (Tier 3 #7) ────────────────────────────────
 # "Oversold + rising momentum" asks for RSI ≤ 35 AND price > SMA50 — two

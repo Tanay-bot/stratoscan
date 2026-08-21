@@ -131,7 +131,7 @@ def main() -> None:
         for fut in concurrent.futures.as_completed(futs):
             try:
                 r = fut.result()
-            except Exception as e:  # never let one symbol kill the run
+            except Exception:  # never let one symbol kill the run
                 failed += 1
                 r = None
             if r:

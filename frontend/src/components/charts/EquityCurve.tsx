@@ -41,8 +41,7 @@ function buildData(item: BacktestResultItem): ChartDatum[] {
   const benchEnd = start * (1 + (benchRaw ?? 0) / 100)
   const mc = item.monte_carlo
   const hasFan = !!mc?.available && equity.length > 1 && end !== start
-  const scale = (pct: number) =>
-    end !== start ? (start * (1 + pct) - start) / (end - start) : 0
+  const scale = (pct: number) => (end !== start ? (start * (1 + pct) - start) / (end - start) : 0)
   return equity.map((p, i) => {
     const t = equity.length > 1 ? i / (equity.length - 1) : 0
     const benchmark = start + (benchEnd - start) * t
@@ -173,11 +172,7 @@ export function EquityCurve({
             </span>
             {hasFan && (
               <span className="flex items-center gap-1.5">
-                <span
-                  className="h-1.5 w-3 rounded-sm bg-neon/30"
-                  aria-hidden="true"
-                />{' '}
-                5–95% spread
+                <span className="h-1.5 w-3 rounded-sm bg-neon/30" aria-hidden="true" /> 5–95% spread
               </span>
             )}
           </div>

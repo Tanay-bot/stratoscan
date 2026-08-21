@@ -36,6 +36,7 @@ os.environ["REDIS_RATE_LIMIT_ENABLED"] = "false"
 
 import numpy as np
 import pandas as pd
+from typing import Optional
 from fastapi.testclient import TestClient
 
 from tests.fakes import FakeUserDB, FakeLLMRouter

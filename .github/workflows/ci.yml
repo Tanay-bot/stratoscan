@@ -39,6 +39,11 @@ jobs:
   accuracy:
     name: Ruff · Golden set · Ground truth · Backtester suites
     runs-on: ubuntu-latest
+    # Dummy, non-secret config: the app's auth endpoints 503 when JWT_SECRET
+    # is absent, and the hermetic suites exercise register/login/me against
+    # FakeUserDB — they need the guard to pass, not a real credential.
+    env:
+      JWT_SECRET: ci-dummy-jwt-secret
     steps:
       - uses: actions/checkout@v4
 

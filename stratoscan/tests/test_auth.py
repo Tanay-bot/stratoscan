@@ -155,12 +155,13 @@ print("✅ no auth → 401")
 
 # Fake the backtest pipeline (interpreter + engine) so the test stays instant.
 class _FakeBacktestEngine:
-    # Mirror the real BacktestEngine signature (Tier 2 added the
-    # strategy_rules passthrough; Tier 4 added start_date/end_date) so the
-    # endpoint's call is accepted.
+    # Mirror the real BacktestEngine signature (Tier 2 added strategy_rules;
+    # Tier 4 start_date/end_date; Tier 1 max_sector_exposure; Tier 3 symbols
+    # + progress_cb) so the endpoint's call is accepted.
     def backtest_top_results(
         self, interpreted, top_n=5, strategy_rules=None,
-        start_date=None, end_date=None,
+        start_date=None, end_date=None, max_sector_exposure=None,
+        symbols=None, progress_cb=None,
     ):
         return {}
 

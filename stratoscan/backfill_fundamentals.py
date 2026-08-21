@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 sys.path.insert(0, ".")
 

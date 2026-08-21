@@ -91,3 +91,6 @@ ignore = [
 "tests/test_imports.py" = ["E402", "E501", "F401"]
 # Long-running behavioral probes at repo root use the same hermetic style.
 "verify_*.py" = ["E402", "E501"]
+# rule_execution_loop.py is the same genre — an accuracy-loop runner whose
+# Layer-C imports come mid-file, deliberately, after their section header.
+"rule_execution_loop.py" = ["E402", "E501"]

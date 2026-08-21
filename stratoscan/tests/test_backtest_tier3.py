@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
 import time
 from typing import Any, Dict, List, Optional
 from unittest import mock
@@ -136,10 +135,7 @@ class _FakeInterpreted:
 # ── 1. Async job lifecycle ─────────────────────────────────────────────────
 print("1. Async job lifecycle (queued → running → done)...")
 from src.api import (  # noqa: E402
-    _BACKTEST_JOBS,
-    _BACKTEST_JOBS_LOCK,
     _run_backtest_pipeline,
-    _build_backtest_response,
     backtest_async,
     backtest_async_status,
 )

@@ -16,7 +16,6 @@ And verifies BEHAVIOR (not just timing):
 """
 
 import json
-import statistics
 import sys
 import threading
 import time

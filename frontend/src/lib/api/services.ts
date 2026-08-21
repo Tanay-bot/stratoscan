@@ -144,9 +144,7 @@ export async function backtest(req: BacktestRequest): Promise<BacktestResponse> 
     // Long timeout: a cold-cache backtest downloads 10 years of OHLCV per
     // symbol (verified live at 40s–2m30s each) before simulating — the 2min
     // default would abort legitimate runs. See LONG_TIMEOUT_MS.
-    await unwrap<BacktestResponse>(
-      api.post('/backtest', req, { timeout: LONG_TIMEOUT_MS }),
-    ),
+    await unwrap<BacktestResponse>(api.post('/backtest', req, { timeout: LONG_TIMEOUT_MS })),
   )
 }
 
