@@ -58,48 +58,7 @@ import type {
   BacktestResultItem,
 } from '@/lib/api/types'
 import { fmtCurrency, fmtPct } from '@/lib/utils'
-
-/** Serialize the full backtest request into URL search params (share link). */
-function serializeParams(req: BacktestRequest): string {
-  const sp = new URLSearchParams()
-  const put = (k: string, v: string | number | boolean | null | undefined) => {
-    if (v !== null && v !== undefined && v !== '') sp.set(k, String(v))
-  }
-  put('q', req.query)
-  put('top_n', req.top_n)
-  put('stop_loss', req.stop_loss_pct)
-  put('take_profit', req.take_profit_pct)
-  put('allow_short', req.allow_short)
-  put('start', req.start_date)
-  put('end', req.end_date)
-  put('allocation', req.portfolio_allocation)
-  put('rebalance', req.rebalance_frequency)
-  put('reinvest', req.dividend_reinvest)
-  put('borrow', req.borrow_rate_pct)
-  put('sector', req.max_sector_exposure)
-  return sp.toString()
-}
-
-/** Rehydrate tune-drawer state from a shareable URL's search params. */
-function parseParams(sp: URLSearchParams) {
-  const n = (k: string, d: number) => {
-    const v = Number(sp.get(k))
-    return Number.isFinite(v) && sp.get(k) !== null ? v : d
-  }
-  return {
-    topN: n('top_n', 5),
-    stopLoss: n('stop_loss', 8),
-    takeProfit: n('take_profit', 20),
-    allowShort: sp.get('allow_short') === 'true',
-    startDate: sp.get('start') ?? '',
-    endDate: sp.get('end') ?? '',
-    allocation: (sp.get('allocation') as 'equal' | 'risk_based') ?? 'equal',
-    rebalance: (sp.get('rebalance') as 'none' | 'monthly' | 'quarterly' | 'yearly') ?? 'none',
-    reinvest: sp.get('reinvest') === 'true',
-    borrow: n('borrow', 0),
-    sector: n('sector', 0),
-  }
-}
+import { serializeParams, parseParams } from '@/lib/backtestParams'
 
 export function Backtest() {
   const [params, setParams] = useSearchParams()
