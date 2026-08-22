@@ -70,7 +70,9 @@ describe('async job polling state machine', () => {
     let finalStatus = 'running'
 
     for (const status of statuses) {
-      events.push(`poll: ${status.status} (${(status.done_symbols ?? []).length}/${status.total_symbols ?? '?'})`)
+      events.push(
+        `poll: ${status.status} (${(status.done_symbols ?? []).length}/${status.total_symbols ?? '?'})`,
+      )
       if (status.status === 'done') {
         finalStatus = 'done'
         break
@@ -87,10 +89,32 @@ describe('async job polling state machine', () => {
   it('transitions from running → done', () => {
     const { events, finalStatus } = simulatePolling([
       { job_id: '1', status: 'running', phase: 'interpreting', total_symbols: 3, done_symbols: [] },
-      { job_id: '1', status: 'running', phase: 'backtesting', total_symbols: 3, done_symbols: ['AAPL'] },
-      { job_id: '1', status: 'running', phase: 'backtesting', total_symbols: 3, done_symbols: ['AAPL', 'MSFT'] },
-      { job_id: '1', status: 'running', phase: 'backtesting', total_symbols: 3, done_symbols: ['AAPL', 'MSFT', 'GOOG'] },
-      { job_id: '1', status: 'done', result: { query: 'test', strategy: {}, results: {}, total_symbols_tested: 3 } },
+      {
+        job_id: '1',
+        status: 'running',
+        phase: 'backtesting',
+        total_symbols: 3,
+        done_symbols: ['AAPL'],
+      },
+      {
+        job_id: '1',
+        status: 'running',
+        phase: 'backtesting',
+        total_symbols: 3,
+        done_symbols: ['AAPL', 'MSFT'],
+      },
+      {
+        job_id: '1',
+        status: 'running',
+        phase: 'backtesting',
+        total_symbols: 3,
+        done_symbols: ['AAPL', 'MSFT', 'GOOG'],
+      },
+      {
+        job_id: '1',
+        status: 'done',
+        result: { query: 'test', strategy: {}, results: {}, total_symbols_tested: 3 },
+      },
     ])
     expect(finalStatus).toBe('done')
     expect(events).toHaveLength(5)
@@ -100,7 +124,13 @@ describe('async job polling state machine', () => {
 
   it('transitions from running → error', () => {
     const { events, finalStatus } = simulatePolling([
-      { job_id: '2', status: 'running', phase: 'backtesting', total_symbols: 5, done_symbols: ['AAPL'] },
+      {
+        job_id: '2',
+        status: 'running',
+        phase: 'backtesting',
+        total_symbols: 5,
+        done_symbols: ['AAPL'],
+      },
       { job_id: '2', status: 'error', error: 'yfinance timeout' },
     ])
     expect(finalStatus).toBe('error')
@@ -148,5 +178,3 @@ describe('CSV export contract', () => {
     expect(typeof req.limit).toBe('number')
   })
 })
-
-

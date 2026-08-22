@@ -110,12 +110,20 @@ function useLiveQuotes(symbols: string[]) {
           prev.map((q) => {
             const real = bySymbol.get(q.sym)
             if (!real) return q
-            return { sym: q.sym, price: real.current_price ?? q.price, chg: real.price_change_pct ?? 0 }
+            return {
+              sym: q.sym,
+              price: real.current_price ?? q.price,
+              chg: real.price_change_pct ?? 0,
+            }
           }),
         )
       })
-      .catch(() => { /* API unreachable — quotes stay null, handled below */ })
-    return () => { cancelled = true }
+      .catch(() => {
+        /* API unreachable — quotes stay null, handled below */
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Gentle client-side drift so prices feel alive between refreshes
@@ -332,8 +340,12 @@ export function TerminalHero() {
                   )}
                 >
                   {q.price !== null ? (
-                    <>{q.chg >= 0 ? '▲' : '▼'} {Math.abs(q.chg).toFixed(2)}%</>
-                  ) : 'loading…'}
+                    <>
+                      {q.chg >= 0 ? '▲' : '▼'} {Math.abs(q.chg).toFixed(2)}%
+                    </>
+                  ) : (
+                    'loading…'
+                  )}
                 </p>
               </div>
             ))}

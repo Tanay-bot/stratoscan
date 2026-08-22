@@ -53,7 +53,9 @@ export function TickerTape({ className }: { className?: string }) {
       .catch(() => {
         /* API unreachable — tape stays empty, no error shown */
       })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const items = useMemo(() => {

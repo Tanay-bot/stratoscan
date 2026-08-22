@@ -9,7 +9,9 @@ import type { BacktestResponse } from '@/lib/api/types'
 // METRICS, not the chart rendering — the EquityCurve test covers that.
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  ComposedChart: ({ children }: { children: React.ReactNode }) => <div data-testid="chart">{children}</div>,
+  ComposedChart: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="chart">{children}</div>
+  ),
   CartesianGrid: () => null,
   XAxis: () => null,
   YAxis: () => null,
@@ -67,8 +69,8 @@ describe('ComparePanel', () => {
     // Values are rendered in the table
     expect(screen.getByText('+20.0%')).toBeInTheDocument() // baseline return
     expect(screen.getByText('+30.0%')).toBeInTheDocument() // challenger return
-    expect(screen.getByText('1.50')).toBeInTheDocument()    // baseline sharpe
-    expect(screen.getByText('1.20')).toBeInTheDocument()    // challenger sharpe
+    expect(screen.getByText('1.50')).toBeInTheDocument() // baseline sharpe
+    expect(screen.getByText('1.20')).toBeInTheDocument() // challenger sharpe
   })
 
   it('shows the winner badge when challenger beats baseline', () => {
@@ -102,7 +104,8 @@ describe('ComparePanel', () => {
     render(<ComparePanel baseline={baseline} challenger={challenger} onClear={onClear} />)
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Clear comparison' }))
-    expect(onClear).toHaveBeenCalledOnce()    })
+    expect(onClear).toHaveBeenCalledOnce()
+  })
 
   it('handles portfolio-level metrics when portfolio is present', () => {
     const withPortfolio: BacktestResponse = {
@@ -124,12 +127,7 @@ describe('ComparePanel', () => {
         rebalance: 'none',
       },
     }
-    render(
-      <ComparePanel
-        baseline={withPortfolio}
-        challenger={challenger}
-        onClear={vi.fn()}
-      />,)
+    render(<ComparePanel baseline={withPortfolio} challenger={challenger} onClear={vi.fn()} />)
     // Should show the combined portfolio return, not individual symbol returns
     expect(screen.getByText('+35.0%')).toBeInTheDocument()
   })
