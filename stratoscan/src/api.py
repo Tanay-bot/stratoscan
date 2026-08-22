@@ -2407,6 +2407,37 @@ def _run_backtest_pipeline(
             detail="Backtest failed. Please try again later.",
         )
 
+    # Per-symbol data age: when the explicit-symbols path bypassed the
+    # screener, the engine's _screen_data_age dict is empty. Look up each
+    # symbol's DB freshness directly so the UI can still render a
+    # DataAgeBadge.
+    for sym in list(bt_results.keys()):
+        bt = bt_results[sym]
+        if bt.data_age_minutes is not None:
+            continue  # already set by backtest_top_results
+        try:
+            from src.database import PostgresDB
+            _db = PostgresDB()
+            with _db._get_conn() as _conn:
+                with _conn.cursor() as _cur:
+                    _cur.execute(
+                        "SELECT updated_at FROM stock_master WHERE symbol = %s",
+                        (sym,),
+                    )
+                    row = _cur.fetchone()
+                    if row and row[0]:
+                        from datetime import datetime, timezone
+                        ts = row[0]
+                        if isinstance(ts, str):
+                            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        age = (datetime.now(timezone.utc) - ts).total_seconds() / 60
+                        bt.data_age_minutes = round(age, 1)
+                        bt.is_stale = age > 15
+        except Exception:
+            pass  # best-effort: don't fail the backtest for age lookup
+
     # Tier 5: aggregate the per-symbol results into ONE shared-pool
     # portfolio (combined equity/drawdown curves, portfolio Sharpe/DD) when
     # ≥2 symbols were backtested. Off-by-default features must not change
