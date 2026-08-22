@@ -2411,30 +2411,35 @@ def _run_backtest_pipeline(
     # screener, the engine's _screen_data_age dict is empty. Look up each
     # symbol's DB freshness directly so the UI can still render a
     # DataAgeBadge.
-    for sym in list(bt_results.keys()):
-        bt = bt_results[sym]
-        if bt.data_age_minutes is not None:
-            continue  # already set by backtest_top_results
+    # Collect symbols that need a DB age lookup (skip those already set
+    # by the screener path).
+    missing_age = [
+        sym for sym, bt in bt_results.items()
+        if bt.data_age_minutes is None
+    ]
+    if missing_age:
         try:
+            from datetime import datetime, timezone
             from src.database import PostgresDB
+            from src.screener import STALE_AFTER_MINUTES
             _db = PostgresDB()
             with _db._get_conn() as _conn:
                 with _conn.cursor() as _cur:
                     _cur.execute(
-                        "SELECT updated_at FROM stock_master WHERE symbol = %s",
-                        (sym,),
+                        "SELECT symbol, updated_at FROM stock_master "
+                        "WHERE symbol = ANY(%s)",
+                        (missing_age,),
                     )
-                    row = _cur.fetchone()
-                    if row and row[0]:
-                        from datetime import datetime, timezone
-                        ts = row[0]
-                        if isinstance(ts, str):
-                            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                        if ts.tzinfo is None:
-                            ts = ts.replace(tzinfo=timezone.utc)
-                        age = (datetime.now(timezone.utc) - ts).total_seconds() / 60
-                        bt.data_age_minutes = round(age, 1)
-                        bt.is_stale = age > 15
+                    for row in _cur.fetchall():
+                        sym, ts = row[0], row[1]
+                        if sym in bt_results and ts:
+                            if isinstance(ts, str):
+                                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                            if ts.tzinfo is None:
+                                ts = ts.replace(tzinfo=timezone.utc)
+                            age = (datetime.now(timezone.utc) - ts).total_seconds() / 60
+                            bt_results[sym].data_age_minutes = round(age, 1)
+                            bt_results[sym].is_stale = age > STALE_AFTER_MINUTES
         except Exception:
             pass  # best-effort: don't fail the backtest for age lookup
 
@@ -2771,8 +2776,9 @@ def _load_backtest_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
         with db._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT job_id, status, phase, done_symbols, total_symbols, "
-                    "result, error FROM backtest_jobs WHERE job_id = %s",
+                    "SELECT job_id, user_email, status, phase, done_symbols, "
+                    "total_symbols, result, error FROM backtest_jobs "
+                    "WHERE job_id = %s",
                     (job_id,),
                 )
                 row = cur.fetchone()
@@ -2780,12 +2786,13 @@ def _load_backtest_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
             return None
         return {
             "job_id": row[0],
-            "status": row[1],
-            "phase": row[2],
-            "done_symbols": row[3] if isinstance(row[3], list) else [],
-            "total_symbols": row[4] or 0,
-            "result": row[5],
-            "error": row[6],
+            "user_email": row[1],
+            "status": row[2],
+            "phase": row[3],
+            "done_symbols": row[4] if isinstance(row[4], list) else [],
+            "total_symbols": row[5] or 0,
+            "result": row[6],
+            "error": row[7],
         }
     except Exception:
         logger.debug("backtest_jobs DB load failed for %s", job_id, exc_info=True)
@@ -2904,8 +2911,8 @@ async def backtest_async_status(
         snapshot = _load_backtest_job_from_db(job_id)
     if not snapshot:
         raise HTTPException(status_code=404, detail="Backtest job not found")
-    # For DB-loaded jobs, skip the user-email check (the DB row already
-    # scopes to the creating user; orphaned jobs are marked 'interrupted').
+    if snapshot.get("user_email") != user.get("email"):
+        raise HTTPException(status_code=404, detail="Backtest job not found")
     return {
         "job_id": snapshot["job_id"],
         "status": snapshot["status"],
