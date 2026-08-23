@@ -126,6 +126,8 @@ router = _mk_llm(
 interp._interpret_cache.clear()
 with mock.patch("src.llm_router.get_router", return_value=router), mock.patch.object(
     interp.settings, "cache_enabled", False
+), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", False
 ):
     q = interp.interpret_query("undervalued tech momentum")
 assert q.raw_input == "undervalued tech momentum"
@@ -162,6 +164,8 @@ router_err = mock.Mock()
 router_err.chat_completion.side_effect = RuntimeError("provider down")
 with mock.patch("src.llm_router.get_router", return_value=router_err), mock.patch.object(
     interp.settings, "cache_enabled", False
+), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", False
 ):
     qe = interp.interpret_query("anything")
 assert qe.filters == [] and qe.error is not None and "LLM call failed" in qe.error
@@ -169,7 +173,9 @@ assert qe.filters == [] and qe.error is not None and "LLM call failed" in qe.err
 # LLM returns unparseable JSON -> error field
 with mock.patch(
     "src.llm_router.get_router", return_value=_mk_llm("totally not json")
-), mock.patch.object(interp.settings, "cache_enabled", False):
+), mock.patch.object(interp.settings, "cache_enabled", False), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", False
+):
     qe2 = interp.interpret_query("anything 2")
 assert qe2.filters == [] and qe2.error is not None and "unparseable" in qe2.error
 
@@ -191,6 +197,8 @@ interp._interpret_cache.clear()
 router3 = _mk_llm('{"sector":"Healthcare","max_rsi":35}')
 with mock.patch("src.llm_router.get_router", return_value=router3), mock.patch.object(
     interp.settings, "cache_enabled", True
+), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", False
 ):
     c1 = interp.interpret_query("Oversold Healthcare stocks")
     c2 = interp.interpret_query("Oversold Healthcare stocks")  # cache hit
@@ -211,7 +219,9 @@ assert router3.chat_completion.call_count == 1, "cache hit must not re-call the 
 interp._interpret_cache.clear()
 with mock.patch(
     "src.llm_router.get_router", return_value=_mk_llm('{"sector":"Energy"}')
-), mock.patch.object(interp.settings, "cache_enabled", False):
+), mock.patch.object(interp.settings, "cache_enabled", False), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", False
+):
     interp.interpret_query("energy")
     interp.interpret_query("energy")
 assert router3.chat_completion.call_count == 1  # untouched from before
@@ -238,6 +248,56 @@ assert "Could not interpret" in interp.format_filters_for_display(qe_disp)
 q_empty = interp.InterpretedQuery(raw_input="q", filters=[])
 assert "No specific filters" in interp.format_filters_for_display(q_empty)
 print("✅ filters, derived, error, and empty cases render")
+
+# ── 7. Hybrid path: deterministic parser takes priority ────────────────
+print("7. Hybrid path (deterministic → LLM fallback)...")
+
+# When deterministic confidence >= 0.6, the LLM is NOT called
+with mock.patch.object(interp.settings, "cache_enabled", False), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", True
+):
+    router = _mk_llm('{"sector": "Technology"}')
+    interp._interpret_cache.clear()
+    with mock.patch("src.llm_router.get_router", return_value=router):
+        result = interp.interpret_query("small cap tech stocks with RSI below 30")
+        assert len(result.filters) > 0, "Deterministic parser should extract filters"
+        router.chat_completion.assert_not_called()
+
+# When deterministic confidence < 0.6, the LLM IS called
+with mock.patch.object(interp.settings, "cache_enabled", False), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", True
+):
+    router = _mk_llm('{"sector": "Technology", "max_pe_ratio": 15}')
+    interp._interpret_cache.clear()
+    with mock.patch("src.llm_router.get_router", return_value=router):
+        result = interp.interpret_query("show me some interesting stocks")
+        router.chat_completion.assert_called_once()
+        assert result.sector == "Technology"
+
+# When use_deterministic_interpreter is False, always use LLM
+with mock.patch.object(interp.settings, "cache_enabled", False), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", False
+):
+    router = _mk_llm('{"sector": "Technology"}')
+    interp._interpret_cache.clear()
+    with mock.patch("src.llm_router.get_router", return_value=router):
+        result = interp.interpret_query("small cap tech stocks with RSI below 30")
+        router.chat_completion.assert_called_once()
+
+# Deterministic parser error → graceful fallback to LLM
+with mock.patch.object(interp.settings, "cache_enabled", False), mock.patch.object(
+    interp.settings, "use_deterministic_interpreter", True
+):
+    router = _mk_llm('{"sector": "Healthcare"}')
+    interp._interpret_cache.clear()
+    with mock.patch("src.llm_router.get_router", return_value=router):
+        with mock.patch("src.deterministic_interpreter.DeterministicInterpreter.parse",
+                        side_effect=RuntimeError("parser crash")):
+            result = interp.interpret_query("tech stocks")
+            router.chat_completion.assert_called_once()
+            assert result.sector == "Healthcare"
+
+print("✅ hybrid path works: deterministic for exact, LLM for fuzzy, toggle off")
 
 mock.patch.stopall()
 print()

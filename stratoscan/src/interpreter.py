@@ -332,6 +332,35 @@ def interpret_query(query: str) -> InterpretedQuery:
             # to mutate the shared cache entry.
             return copy.deepcopy(cached)
 
+    # ── Hybrid path: try deterministic parser first ────────────────────
+    # The deterministic parser handles ~80% of queries (exact criteria
+    # like "RSI below 30", "small cap tech stocks") in <1ms with zero
+    # cost.  Fuzzy queries ("show me some interesting stocks") score low
+    # confidence and fall through to the LLM.
+    if getattr(settings, 'use_deterministic_interpreter', True):
+        try:
+            from src.deterministic_interpreter import (
+                DeterministicInterpreter,
+                CONFIDENCE_THRESHOLD,
+            )
+            det = DeterministicInterpreter()
+            det_result, det_conf = det.parse(query)
+            if det_conf >= CONFIDENCE_THRESHOLD:
+                logger.info(
+                    "Deterministic parse (conf=%.2f) for '%s': %d filters",
+                    det_conf, query, len(det_result.filters),
+                )
+                if settings.cache_enabled:
+                    _interpret_cache.set(key, copy.deepcopy(det_result))
+                return det_result
+            logger.debug(
+                "Deterministic confidence %.2f < %.2f, LLM fallback for '%s'",
+                det_conf, CONFIDENCE_THRESHOLD, query,
+            )
+        except Exception as e:
+            logger.debug("Deterministic parser error, LLM fallback: %s", e)
+    # ── End hybrid path ───────────────────────────────────────────────
+
     try:
         # Route through the multi-provider router: tries providers in priority
         # order and fails over instantly on 429/5xx/dead keys, so a single

@@ -113,6 +113,13 @@ class Settings(BaseSettings):
     # Override per provider with <NAME>_TIMEOUT in .env (see llm_router).
     llm_provider_timeout: float = 120.0
 
+    # ── Hybrid interpreter toggle ──────────────────────────────────────
+    # When True, interpret_query() tries the deterministic parser first.
+    # If confidence >= 0.6 the result is used (sub-ms, zero cost).
+    # If confidence < 0.6, falls back to the LLM.  Set to False to
+    # force LLM-only mode (useful for A/B testing or debugging).
+    use_deterministic_interpreter: bool = True
+
     # ── HTTP timeouts (background jobs / external data) ──────────────────
     # Finnhub: the python SDK defaults every request to 10s — too tight for
     # bulk refresh loops on slow networks. We set the SDK's DEFAULT_TIMEOUT
