@@ -81,7 +81,7 @@ editing anything.**
    fees, slippage, signal generation, position sizing or portfolio logic must update that file or
    CI fails. `verify_backtest_accuracy.py` + `verify_trade_pnl.py` re-derive every number from
    first principles.
-7. **Hermetic tests only, unless the task is explicitly a live probe.** The 32 backend suites
+7. **Hermetic tests only, unless the task is explicitly a live probe.** The backend suites
    fake the LLM (`tests/fakes.py::FakeLLMRouter`) and the DB (`FakeUserDB`, `FakeQualityDB`). Live
    verification happens in the `verify_*.py` scripts / `run_probes.py`, never in the unit suites.
 8. **SQL injection is impossible by construction.** Column names from the interpreter resolve
@@ -174,9 +174,9 @@ stratoscan/                          # Backend (Python)
 │   ├── metrics.py           # Prometheus /metrics (stdlib exporter) + middleware
 │   ├── admin_dashboard.py   # Self-contained HTML admin dashboard
 │   └── logging_config.py    # Text/JSON logging setup
-├── tests/                   # 32 hermetic suites (run: python -m tests.test_<name>)
+├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
-├── verify_*.py              # 20 live behavior probes (release gate)
+├── verify_*.py              # live behavior probes (release gate; run_probes.py picks the set)
 ├── run_probes.py            # Probe runner against isolated stratoscan_probes DB
 ├── accuracy_loop.py         # 30-query accuracy verification loop
 ├── rule_execution_loop.py   # Rule-execution ground-truth tests
@@ -322,7 +322,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | GET | `/stocks` | — | browse universe (paginated) |
 | GET | `/stocks/{symbol}` | — | single stock + sentiment |
 | POST | `/refresh` | admin | trigger a refresh cycle (admin-gated) |
-| GET | `/ops/jobs`, `/ops/jobs/{name}` | — | job monitor |
+| GET | `/ops/jobs`, `/ops/jobs/{name}` | admin | job monitor (`require_admin` — NOT public) |
 | GET | `/admin/overview`, `/admin/users`, `/admin/jobs` | admin | admin API |
 | PATCH | `/admin/users/{user_id}` | admin | update plan/admin/verified |
 | GET | `/admin` | admin | self-contained HTML dashboard (`admin_dashboard.py`) |
@@ -868,8 +868,11 @@ the flag is set.
   from screens entirely.
 - **`/meta`** returns the capability manifest the frontend renders from (endpoint catalog,
   sortable columns, NL filter fields + operators, example queries, rate-limit budgets,
-  pagination contract, auth feature flags). `test_frontend_meta.py` + `R8` (contract diff)
-  keep `/openapi.json` and `FRONTEND_API.md` in lockstep.
+  pagination contract, auth feature flags). `test_frontend_meta.py` pins the `/meta`
+  manifest itself; `test_docs_contract.py` pins the committed `openapi.json` /
+  `openapi.pretty.json` snapshots against the live app (regenerate with
+  `python scripts/regen_openapi.py`). `FRONTEND_API.md` is maintained by hand — when it
+  and the server disagree, the server wins.
 - **CSV exports:** `POST /backtest/export`, `POST /screen/export` return Blobs.
 - **Health:** `/health` does a real `SELECT 1` with `db_connect_timeout` (15s — Neon cold
   starts exceed 3s; a tight probe would false-alarm).
@@ -906,7 +909,7 @@ staging API by design for E2E). See `STAGING.md`.
 
 ## 14. Testing & verification
 
-### Backend hermetic suites (32, no network/quota)
+### Backend hermetic suites (`tests/test_*.py`, no network/quota)
 
 ```bash
 cd stratoscan
@@ -934,7 +937,7 @@ fillin, tier3, tier4, db, portfolio), `test_redis_ratelimit`, `test_cache`, `tes
 `src.llm_router.get_router` before constructing the TestClient. CI sets a dummy `JWT_SECRET`
 (boot guard) — auth endpoints 503 without it.
 
-### Live behavior probes (`verify_*.py`, 20 files)
+### Live behavior probes (`verify_*.py`)
 
 Ground-truth checks that run against real staging resources. Notable: `verify_backtest_accuracy`
 (hand-computed fills/PnL/Sharpe/DD/benchmark), `verify_trade_pnl` (cash P&L vs reported),
@@ -948,7 +951,7 @@ headers), `verify_data_accuracy` (25-symbol Finnhub-vs-yfinance diff),
 
 ### Release gate
 
-`run_probes.py` runs 18 probes sequentially in subprocesses, each with env staged from
+`run_probes.py` runs its `PROBES` list sequentially in subprocesses, each with env staged from
 `staging.env` and `DATABASE_URL` forced to the isolated `stratoscan_probes` DB (Upstash
 blanked; `verify_throughput` gets its own booted uvicorn with rate limiting ON). Exit 0 = all
 pass; writes a markdown report. `scripts/run_release_gate.sh` wraps it. CI gate job runs all
@@ -1002,8 +1005,10 @@ Four GitHub Actions workflows (all on push to `main`; frontend ones also on PRs)
 (`STAGING_DATABASE_URL`, staging LLM keys).
 
 **Infra:** Fly.io `fly.toml` (single always-on machine, iad region, `/health` check every 30s,
-256MB VM ≈ $2–3/mo). Vercel for the frontend. `DEPLOY.md` is the manual runbook (Cloudflare
-Pages was the historical deploy target; Vercel is current — workflows win when docs disagree).
+256MB VM ≈ $2–3/mo). Vercel for the frontend. `DEPLOY.md` is the manual runbook; the
+workflows win when the two disagree. Frontend security headers ship via
+`frontend/vercel.json` — Vercel ignores `public/_headers`, which is kept only as a
+portable mirror and pinned in sync by `npm run verify:headers`.
 `CORS_ALLOW_ORIGINS` must include the real frontend origin in prod.
 
 ---
@@ -1019,7 +1024,7 @@ Pages was the historical deploy target; Vercel is current — workflows win when
 | Run the release gate | `python run_probes.py [--only NAME ...] [--report out.md]` (needs staging.env + seeded probes DB via `seed_probes_db.py`) |
 | Frontend dev | `cd frontend && npm run dev` |
 | Frontend tests | `npm test` |
-| Regenerate OpenAPI | `python -c "from src.api import app; import json; print(json.dumps(app.openapi()))" > openapi.json` |
+| Regenerate OpenAPI | `python scripts/regen_openapi.py` (writes both snapshots; `test_docs_contract` fails if stale) |
 | Migrations | `alembic upgrade head` (auto-run at boot; `python -m src.main setup` too) |
 | Backfill OHLCV | `python -m src.main backfill-history --symbols AAPL,MSFT --years 10` |
 | Warm cache once | `python -m src.main warm-cache` |
@@ -1105,7 +1110,7 @@ These shaped current behavior — don't "clean up" them without understanding wh
   `SCHEDULER.md` with the heartbeat/watchdog story (Fly restart covers the API; heartbeat
   alert covers the scheduler; manual `flyctl machines restart` recovery).
 - **Staging + probes infrastructure:** `staging.env(.example)`, `seed_probes_db.py`,
-  `run_probes.py` (18 probes vs the isolated `stratoscan_probes` DB), release-gate wiring in
+  `run_probes.py` (probes vs the isolated `stratoscan_probes` DB), release-gate wiring in
   `deploy.yml`.
 - **Alert delivery wired:** `send_alert` delivers via webhook (preferred) or SendGrid email,
   throttled per key, fire-and-forget; fired by `JobMonitor._alert_failed` and

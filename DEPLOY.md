@@ -12,9 +12,12 @@
 >   deploy → healthcheck)
 > - `.github/workflows/ci.yml` + `frontend-ci.yml` — hermetic test/lint gates
 >   on every push/PR
-> - `.github/workflows/run_probes.yml` (if present) — 17 behavior probes
-  (incl. the scheduler-watchdog probe, see `stratoscan/SCHEDULER.md`, and
-  the yfinance data-accuracy probe, see `stratoscan/RELEASE_GATE.md`)
+> - The release gate (behavior probes) is an **opt-in job inside
+>   `deploy.yml`**, not its own workflow — enable it with the
+>   `run_release_gate` workflow_dispatch input or the `RUN_RELEASE_GATE`
+>   repository variable. `stratoscan/RELEASE_GATE.md` owns the probe list
+>   (incl. the scheduler-watchdog probe, see `stratoscan/SCHEDULER.md`, and
+>   the yfinance data-accuracy probe).
 >
 > Push to `main` and both deploys happen automatically. The manual commands
 > below remain the source of truth for what the workflows execute.
@@ -59,54 +62,65 @@ Everything else is external SaaS that already has free tiers:
 
 ---
 
-## 1. Frontend → Cloudflare Pages (free)
+## 1. Frontend → Vercel (free tier)
 
-### First deploy (CLI)
+### CI/CD (recommended)
+
+`.github/workflows/frontend-deploy.yml` deploys on every push to `main`, and
+opens an ephemeral preview deploy on every PR. The manual commands below are
+for first-time setup and debugging.
+
+### First deploy (manual — one-time)
 
 ```bash
 cd frontend
-npx wrangler login
-
-# One-time project creation + deploy of the current build:
+npx vercel login
+npx vercel link          # connect this directory to a Vercel project
 npm run build
-npx wrangler pages deploy dist --project-name stratoscan
+npx vercel --prod
 ```
 
-### Or connect GitHub (auto-build on push to `main`)
+### Or import the repo in the dashboard (auto-build on push to `main`)
 
-Dashboard → **Workers & Pages → Create → Pages → Connect to Git** → pick the
-repo, set:
+vercel.com → **Add New → Project → Import Git Repository** → pick the repo:
 
 | Setting | Value |
 |---|---|
-| Build command | `cd frontend && npm run build` |
-| Build output directory | `dist` |
+| Framework preset | Vite (auto-detected) |
 | Root directory | `frontend` |
+| Build command | `npm run build` |
+| Output directory | `dist` |
 
-### Build-time env vars (required — set in dashboard)
+### Build-time env vars (required)
 
-Pages → project → **Settings → Environment variables → Production**:
+Project → **Settings → Environment Variables → Production**:
 
 ```bash
 VITE_API_URL=https://stratoscan-api.fly.dev   # your Fly.io backend origin
+VITE_SITE_URL=https://stratoscan.com          # public origin for canonical/OG URLs
 VITE_SENTRY_DSN=https://xxxx@o123.ingest.sentry.io/123   # from Sentry (step 3)
 VITE_DEMO_MODE=false
 ```
 
 > Vite bakes `VITE_*` values into the bundle at build time, so these are
 > **build env vars**, not runtime secrets. Changing them = new deploy.
+> The deploy workflow also forwards them via `--build-env` so the gated
+> artifact and the deployed artifact are configured identically.
 
 ### Custom domain
 
-Pages → project → **Custom domains** → add `app.stratoscan.com` (free SSL
-auto-issued). Then add it to the backend CORS allowlist (step 2).
+Project → **Settings → Domains** → add `app.stratoscan.com` (free SSL auto-issued).
+Then add it to the backend CORS allowlist (step 2) and set `VITE_SITE_URL` to match.
 
 ### Security headers
 
-Already wired: `frontend/public/_headers` ships CSP, `nosniff`, HSTS,
-`frame-ancestors 'none'`, `Permissions-Policy`; `frontend/public/_redirects`
-does the SPA fallback. CSP `connect-src https:` covers both the Fly.io API
-and Sentry ingest.
+Wired in **`frontend/vercel.json`** — CSP, `nosniff`, HSTS, `frame-ancestors 'none'`,
+`Referrer-Policy`, `Permissions-Policy`, plus the SPA rewrite. `frontend/public/_headers`
+is a portable mirror only: **Vercel does not read `_headers`** (that is a Cloudflare Pages
+/ Netlify convention), which is why the headers live in `vercel.json`.
+`npm run verify:headers` pins the two in sync and runs in both frontend gates.
+CSP `connect-src` must list the backend origin — update it if the API ever moves.
+Rationale and the post-deploy `curl` acceptance check live in `frontend/DEPLOYMENT.md`.
 
 ---
 
@@ -150,7 +164,7 @@ fly secrets set \
   UPSTASH_REDIS_REST_URL="..." \
   UPSTASH_REDIS_REST_TOKEN="..." \
   REDIS_RATE_LIMIT_ENABLED="true" \
-  CORS_ALLOW_ORIGINS="https://stratoscan.pages.dev,https://app.stratoscan.com" \
+  CORS_ALLOW_ORIGINS="https://stratoscan.vercel.app,https://app.stratoscan.com" \
   SENDGRID_API_KEY="SG.xxx" \
   EMAIL_FROM_ADDRESS="noreply@stratoscan.com" \
   APP_BASE_URL="https://app.stratoscan.com" \
@@ -202,8 +216,9 @@ curl -s https://stratoscan-api.fly.dev/health
 
 ### Where it goes
 
-- **Option A (recommended):** paste it into the Cloudflare Pages dashboard env
-  vars (`VITE_SENTRY_DSN`) → redeploy.
+- **Option A (recommended):** set it as the `VITE_SENTRY_DSN` GitHub secret (the
+  deploy workflow forwards it to Vercel's build), or add it directly in the Vercel
+  dashboard under Settings → Environment Variables → redeploy.
 - **Option B (local dev):** put it in `frontend/.env.local` as
   `VITE_SENTRY_DSN=...` (`.env.local` is gitignored).
 

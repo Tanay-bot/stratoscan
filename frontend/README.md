@@ -102,32 +102,29 @@ repo. Both are documented in `.env.example`.
 3. Throw a test error with the DSN active, then confirm the event's stack
    trace shows original `src/...` paths with line numbers, not minified names.
 
-## Authentication & silent refresh
+## Authentication
 
-The app uses JWT auth (`Authorization: Bearer <token>`, 7-day TTL). To avoid a
-mid-session forced logout when the token nears expiry, the frontend silently
-refreshes it via **`POST /auth/refresh`** (see `stratoscan/FRONTEND_API.md`
-§5 for the contract):
+The app uses JWT auth (`Authorization: Bearer <token>`, 7-day TTL). There is
+**no silent refresh**: the backend exposes no `POST /auth/refresh` route (see
+`stratoscan/FRONTEND_API.md` §5, which owns this contract). A token simply
+expires and the session ends.
 
-- **Proactive timer** (`src/store/auth.ts`): 60s before expiry, exchanges the
-  token; success → session continues, timer re-arms for the next cycle;
-  failure → clean logout + redirect to `/login`.
-- **Request interceptor** (`src/lib/api/client.ts`): any request made within
-  60s of expiry refreshes first, so the outbound call always carries a live
-  token.
-- **401 response interceptor**: on a 401 from a live session, refreshes once
-  and retries the original request; if refresh fails (endpoint missing,
-  network down, revoked token) it degrades to logout — identical to the
-  pre-refresh behavior, so the frontend is safe to ship before the backend
-  endpoint exists.
-- **Single-flight**: concurrent refresh triggers coalesce into one request;
-  a logout that races an in-flight refresh never resurrects the session.
-- **Bootstrap**: a persisted session whose deadline already passed is
-  resurrected with one refresh attempt before `/auth/me` revalidates.
-- **Multi-tab**: rotation in one tab propagates to all others via the
+- **Storage** (`src/store/auth.ts`): the token, the absolute expiry
+  (`stratoscan_token_expires_at`) and the user are persisted to
+  `localStorage`, so a token is never trusted past its deadline.
+- **Bootstrap**: on load, a session whose deadline has already passed is
+  discarded without a network call; otherwise `/auth/me` revalidates it.
+- **401 handling** (`src/lib/api/client.ts`): a 401 from any endpoint other
+  than the auth entry points clears the session and redirects to `/login`.
+  Auth paths are exempt — a 401 there is a normal "bad credentials" answer,
+  not an expired session.
+- **Multi-tab**: logout and login propagate to other tabs via the
   localStorage `storage` event.
 
-Demo mode never refreshes (fake tokens don't expire).
+Demo mode never authenticates against a server (fake tokens don't expire).
+
+A refresh endpoint can be added later without a coordinated release: the
+client already tracks absolute expiry, so only the renewal call would be new.
 
 ## Reduced motion & accessibility
 

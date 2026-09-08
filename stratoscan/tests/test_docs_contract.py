@@ -142,14 +142,19 @@ for probe in declared_probes:
     ), f"run_probes.py lists {probe} but the file does not exist"
 print(f"✅ all {len(declared_probes)} probe files exist on disk")
 
-# Any prose stating a probe COUNT is drift waiting to happen: RELEASE_GATE.md
-# owns that number, and the table above is what makes it true.
-_stated_counts = re.findall(r"\b(\d+)\s+(?:behavior\s+)?probes\b", _gate_md)
-for count in _stated_counts:
-    assert int(count) == len(declared_probes), (
-        f"RELEASE_GATE.md prose says {count} probes but run_probes.py runs "
-        f"{len(declared_probes)}"
-    )
-print(f"✅ RELEASE_GATE.md prose counts agree ({len(_stated_counts)} mention(s) checked)")
+# Any prose stating a probe COUNT is drift waiting to happen — that number was
+# variously 15, 17 and 18 across the docs. RELEASE_GATE.md owns it (the table
+# above is what makes it true); every other file that repeats it is checked here.
+_count_files = ("RELEASE_GATE.md", "FAILURE_DRILLS.md")
+_checked = 0
+for _fname in _count_files:
+    _text = open(os.path.join(_PROJECT_ROOT, _fname), encoding="utf-8").read()
+    for count in re.findall(r"\b(\d+)\s+(?:behavior\s+)?probes\b", _text):
+        assert int(count) == len(declared_probes), (
+            f"{_fname} prose says {count} probes but run_probes.py runs "
+            f"{len(declared_probes)}"
+        )
+        _checked += 1
+print(f"✅ probe counts in prose agree with run_probes.py ({_checked} mention(s) checked)")
 
 print("\n✅ ALL DOCS CONTRACT TESTS PASSED")

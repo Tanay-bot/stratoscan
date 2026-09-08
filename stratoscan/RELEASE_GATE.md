@@ -5,7 +5,7 @@ runs all 18 behavior probes against the isolated staging environment and
 **blocks deployment if any probe fails**.
 
 It complements (not replaces) the hermetic CI suite: CI (`.github/workflows/ci.yml`)
-lints and runs the 30 fast, fake-everything test modules on every push. The gate
+lints and runs the fast, fake-everything `tests/test_*.py` modules on every push. The gate
 runs the slow, real-environment probes (backtest accuracy, trade P&L,
 load/throughput, LLM-router lifecycle, screener lifecycle, Neon lifecycle,
 screen-cache, security) that CI deliberately cannot run.
@@ -158,5 +158,3 @@ curve and stayed read-only. The real Neon Console restore is a human/API
 step (documented in `STAGING.md` → "PITR restore drill") — the drill's
 default mode performs the restore-equivalent clone and verifies every
 downstream guarantee. Run it after any restore, and quarterly as a drill.
-
-## When to run it

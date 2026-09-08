@@ -38,18 +38,6 @@ before touching the scheduler in production.
   at 02:00, news+sentiment every `NEWS_REFRESH_MINUTES`, backtest cache
   warmer daily at `BACKTEST_CACHE_WARMER_TIME`).
 - **JobMonitor** (`src/job_monitor.py`): every job run is recorded to the
-
-- **Data-source limitation — `volume` stays NULL (verified live 2026-08-06):**
-  this Finnhub plan's `/quote` response omits the `v` field entirely (keys are
-  `c d dp h l o pc t` — no `v`), so `fetch_stock_quote` maps it to None for
-  every symbol. The candles endpoint that *does* carry volume returns 403
-  (paid tier), and `avgVolume` from `/stock/metric` is also None on this plan.
-  **This is not a code bug** — the fetcher maps the field correctly; the
-  source simply never sends it. Volume-based screener filters will match
-  nothing until a plan/data source that provides volume is configured. The
-  one populated row (`A` = 123456) is stale placeholder data from an early
-  fill — treat it as noise. Technicals (`sma_50`/`rsi_14`/`high_52w`) are
-  unaffected: they come from `/technical_indicator` and populate normally.
   `job_runs` table (status, duration, record count, error); the scheduler
   writes a throttled liveness heartbeat to `scheduler_heartbeat`.
 - **API surface**: `GET /ops/jobs` (admin-only) shows every job's latest run,
@@ -59,6 +47,20 @@ before touching the scheduler in production.
   suspend between refreshes (free-tier compute). The heartbeat is persisted
   at most every `JOB_HEARTBEAT_PERSIST_MINUTES` (default 15) for the same
   reason.
+
+### Known data-source limitation — `volume` stays NULL
+
+Verified live 2026-08-06:
+this Finnhub plan's `/quote` response omits the `v` field entirely (keys are
+`c d dp h l o pc t` — no `v`), so `fetch_stock_quote` maps it to None for
+every symbol. The candles endpoint that *does* carry volume returns 403
+(paid tier), and `avgVolume` from `/stock/metric` is also None on this plan.
+**This is not a code bug** — the fetcher maps the field correctly; the
+source simply never sends it. Volume-based screener filters will match
+nothing until a plan/data source that provides volume is configured. The
+one populated row (`A` = 123456) is stale placeholder data from an early
+fill — treat it as noise. Technicals (`sma_50`/`rsi_14`/`high_52w`) are
+unaffected: they come from `/technical_indicator` and populate normally.
 
 ---
 

@@ -204,7 +204,13 @@ and network tab for errors; verify the loading state copy and the honest `messag
 
 ---
 
-## Current Status (2026-08-09)
+## Status snapshot — 2026-08-09
+
+> ⚠️ **This table is a point-in-time record, not live state.** It was last
+> updated on the date in the heading and is not refreshed automatically; the
+> `⏳` rows below were pending as of that date and may or may not still be.
+> For current, machine-checked status run the suites themselves (§ "Run
+> command" above) — they are the source of truth, not this table.
 
 | Phase | Status |
 |---|---|

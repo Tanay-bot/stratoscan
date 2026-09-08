@@ -18,7 +18,7 @@ Four layers, each designed around **near-zero operating cost**:
 |---|---|---|
 | **1. NL Interpreter** | Translates "find undervalued small-cap tech stocks with rising momentum" into structured filters | 1 LLM call per query (free-tier keys) |
 | **2. Real-Time Screener** | Filters ~5,000 US stocks from a local PostgreSQL DB | **0 API calls per query** |
-| **3. Backtesting Engine** | Simulates a strategy on 10 years of OHLCV with fees + slippage, stops, sizing, Monte Carlo, walk-forward | yfinance downloads (cached in SQLite) |
+| **3. Backtesting Engine** | Simulates a strategy on 10 years of OHLCV with fees + slippage, stops, sizing, Monte Carlo, walk-forward | yfinance downloads (cached in the backtest DB — Neon in prod, SQLite in dev) |
 | **4. Enrichment** | News + sentiment for top matches, stored in a separate news DB | Batch job, 0 calls per query |
 
 Key cost-control decisions:
@@ -26,9 +26,12 @@ Key cost-control decisions:
 - **10 Finnhub keys** rotated round-robin → 600 req/min free tier, split
   across keys. A background scheduler refreshes the DB; user queries never
   hit Finnhub.
-- **Free-tier LLM keys** (Z.ai GLM-4.7-Flash via ZenMux, Groq, Gemini)
-  routed through `src/llm_router.py` with instant failover — one provider
-  cooling down never blocks a user.
+- **Free-tier LLM keys** routed through `src/llm_router.py` with instant
+  failover — one provider cooling down never blocks a user. `LLM_PROVIDERS`
+  sets the priority order; the shipped default is Z.ai (`glm-4.5-flash`),
+  then Gemini, then Groq. ZenMux (`z-ai/glm-4.7-flash-free`) is the legacy
+  `LLM_BASE_URL`/`LLM_MODEL` fallback used when no provider has keys.
+  `.env.example` owns the exact endpoints and model ids.
 - **Interpret cache (24h)** + **screen cache (60s)** so repeat queries burn
   zero LLM calls.
 - **Weekly + daily rate limits** per IP and shared global buckets protect
@@ -101,7 +104,7 @@ docker run --env-file .env -p 8000:8000 stratoscan
 | POST | `/auth/resend-verification` | JWT | Send a fresh verification link |
 | GET | `/stocks`, `/stocks/{symbol}` | — | Browse the universe |
 | GET | `/news`, `/news/{symbol}` | — | News feed + sentiment |
-| POST | `/refresh` | — | Trigger async Finnhub refresh |
+| POST | `/refresh` | JWT (admin) | Trigger async Finnhub refresh (thousands of Finnhub calls — admin-gated) |
 | GET | `/admin` | JWT (admin) | Self-contained operator dashboard (HTML) — users, jobs, health |
 | GET | `/admin/overview` | JWT (admin) | User counts, plans, verification stats |
 | GET | `/admin/users` | JWT (admin) | Paginated user list |
@@ -182,7 +185,8 @@ record count, error) and the scheduler emits a throttled heartbeat
 | `GET /ops/jobs/{job_name}` | Recent run history for one job (newest first) |
 
 Known job names: `price_refresh`, `technical_refresh`, `fundamental_refresh`,
-`news_refresh`, `manual_refresh`. The heartbeat is persisted at most every
+`news_refresh`, `backtest_cache_warm`, `manual_refresh`, `historical_backfill`
+(the authoritative list is `JOB_DEFINITIONS` in `src/job_monitor.py`). The heartbeat is persisted at most every
 `JOB_HEARTBEAT_PERSIST_MINUTES` (default 15) so Neon can still auto-suspend
 between refresh cycles; "scheduler alive" is judged at 3× that interval.
 In-memory fallback when no database — monitoring never breaks a refresh job.
@@ -275,5 +279,5 @@ stratoscan/
 - [x] Signup email verification (SendGrid, stdlib-only client, alembic migration)
 - [x] News + sentiment pipeline (dedicated key + separate DB)
 - [x] Rate limits, caching, pagination, configurable timeouts
-- [ ] Frontend (screener UI + backtest workspace)
+- [x] Frontend (screener UI + backtest workspace) — `frontend/`, deployed on Vercel
 - [x] Redis-backed rate limiting for multi-worker exactness (Upstash REST, src/redis_ratelimit.py)

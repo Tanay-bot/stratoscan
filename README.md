@@ -284,7 +284,7 @@ Per-IP limits are configurable via `RATE_LIMIT_PER_MINUTE` and `RATE_LIMIT_PER_D
 | **Screener** | `/app/screener` | NL query → ranked stock results with filters, sort, pagination |
 | **Backtest** | `/app/backtest` | 3-pane workspace: strategy chat, results (KPIs + equity curve + robustness), generated code |
 | **News** | `/app/news` | Browse latest news with sentiment badges |
-| **Dashboard** | `/app/dashboard` | Personal watchlist, saved screeners, recent backtests |
+| **Dashboard** | `/app` | Personal watchlist, saved screeners, recent backtests |
 | **Settings** | `/app/settings` | Account settings, email verification status |
 | **Admin** | `/admin` | Backend-served operator dashboard (users, jobs, health) |
 
@@ -487,8 +487,8 @@ fly deploy
 
 # Frontend (Vercel)
 cd frontend
-npx wrangler pages deploy dist --project-name stratoscan
-# Or connect GitHub in the Vercel dashboard for auto-deploy
+npx vercel link          # one-time: connect this directory to a Vercel project
+npx vercel --prod        # or just push to main — frontend-deploy.yml does it for you
 ```
 
 ### Required GitHub Actions secrets
@@ -511,12 +511,18 @@ The scheduler runs as a separate process (`python -m src.main scheduler`) and ma
 | Job | Schedule | What it does |
 |-----|----------|-------------|
 | `price_refresh` | Every 15 min | Fetches latest quotes via Finnhub (10-key round-robin) |
-| `technical_refresh` | Daily | Computes RSI, SMA, MACD, Bollinger bands, etc. |
-| `fundamental_refresh` | Weekly | Updates P/E, margins, growth, EV/EBITDA |
-| `news_refresh` | Every 2 hours | Fetches + LLM-scores news for top-150 by market cap |
-| `backtest_cache_warmer` | Daily at 03:30 | Pre-fetches 10y OHLCV for top-100 stocks |
+| `technical_refresh` | Every 4th price cycle (~60 min) | Computes RSI, SMA, MACD, Bollinger bands, etc. for the top 500 by market cap |
+| `fundamental_refresh` | Daily at 02:00 | Updates P/E, margins, growth, EV/EBITDA |
+| `news_refresh` | Every `NEWS_REFRESH_MINUTES` (default 120) | Fetches + LLM-scores news for top-150 by market cap |
+| `backtest_cache_warm` | Daily at `BACKTEST_CACHE_WARMER_TIME` (03:30) | Pre-fetches 10y OHLCV for top-100 stocks |
 
-Every scheduler run is recorded to the `job_runs` table and exposed via `GET /ops/jobs`. The scheduler emits a throttled heartbeat so a silently-dead refresh is never missed.
+`manual_refresh` (`POST /refresh`) and `historical_backfill` are also tracked but run on
+demand rather than on a schedule.
+
+Every scheduler run is recorded to the `job_runs` table and exposed via `GET /ops/jobs`
+(admin-only). The scheduler emits a throttled heartbeat so a silently-dead refresh is never
+missed. `stratoscan/SCHEDULER.md` owns the cadence, staleness and watchdog details; the
+cadence constants live in `src/scheduler.py` and `job_monitor.JOB_DEFINITIONS`.
 
 **Important:** Run exactly ONE scheduler process. Do not scale to multiple machines or the jobs will duplicate.
 

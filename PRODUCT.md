@@ -2,6 +2,14 @@
 
 <!-- impeccable:product-schema 1 -->
 
+> ℹ️ **Historical brief.** This file records the product intent captured
+> *before* the frontend was built, and is kept as-is (it is tool-managed).
+> Several statements are no longer true of the shipped system — notably,
+> watchlist / saved screeners / recent backtests are **not** client-only any
+> more: they sync through `GET/PUT /me/personal`. For the current state of
+> the system see `CLAUDE.md`; for what the frontend actually looks like see
+> `DESIGN.md`.
+
 ## Platform
 
 web

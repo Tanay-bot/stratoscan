@@ -10,13 +10,13 @@ references "staging" 6+ times but no staging environment existed.
 | Resource | Value | Notes |
 |---|---|---|
 | **Staging database** | `stratoscan_staging` — a second database in the **same Neon project** as production | Created via `CREATE DATABASE stratoscan_staging` (schema copy approach allowed by the task). Same host/user/password; only the database path differs. |
-| **Probes database** | `stratoscan_probes` — a THIRD database in the same Neon project, dedicated to the 15 `verify_*.py` behavior probes (P0-12) | Probes mutate/abuse rows as part of their job — they must never touch prod **or** the E2E staging DB. Isolation is structural: a separate database. |
+| **Probes database** | `stratoscan_probes` — a THIRD database in the same Neon project, dedicated to the `verify_*.py` behavior probes (P0-12) | Probes mutate/abuse rows as part of their job — they must never touch prod **or** the E2E staging DB. Isolation is structural: a separate database. |
 | **Staging env file** | `staging.env` (gitignored) + `staging.env.example` (committed template) | `DATABASE_URL` → `stratoscan_staging`; `STAGING_DATABASE_URL` → `stratoscan_probes`; `RATE_LIMIT_ENABLED=false`; `REDIS_RATE_LIMIT_ENABLED=false` |
 | **Staging Fly app** | `fly.staging.toml` → app `stratoscan-staging` | Separate machine from prod, always-on, `/health` check |
 | **Staging server (local)** | `run_staging.py` → port **8010** | Loads `staging.env` only; production `.env` untouched |
 | **Seeding (staging)** | `seed_staging.py` | Copies top-50 (default) / `--all` real rows from prod stock_master + creates full schema |
 | **Seeding (probes)** | `seed_probes_db.py` | **100+ stocks with real data**: top-100 by market cap from prod (AAPL guaranteed) + 20 random symbols + **real SPY OHLCV from yfinance** (ETFs aren't in the equity universe). Creates the full schema on `stratoscan_probes`. |
-| **Probe runner** | `run_probes.py` | Runs ALL 18 `verify_*.py` probes against `stratoscan_probes` with a pass/fail report. Boots a dedicated rate-limited server for `verify_throughput` (via `probe_server_entry.py`). This is the R2 release-gate entry point. |
+| **Probe runner** | `run_probes.py` | Runs every probe in its `PROBES` list against `stratoscan_probes` with a pass/fail report. Boots a dedicated rate-limited server for `verify_throughput` (via `probe_server_entry.py`). This is the R2 release-gate entry point. |
 
 **Safety invariants**
 - `run_staging.py` refuses to start unless `DATABASE_URL` contains `stratoscan_staging`.
@@ -95,7 +95,8 @@ PY
 /usr/local/bin/python3.14 seed_probes_db.py
 /usr/local/bin/python3.14 seed_probes_db.py --top 50 --random 25 --no-spy
 
-# 4. Run ALL 17 behavior probes against the probes DB (release gate R2).
+# 4. Run the behavior probes against the probes DB (release gate R2).
+#    RELEASE_GATE.md lists them; run_probes.py PROBES defines the set.
 /usr/local/bin/python3.14 run_probes.py
 /usr/local/bin/python3.14 run_probes.py --only verify_throughput.py verify_load_behavior.py
 ```
@@ -262,7 +263,7 @@ curl https://stratoscan-staging.fly.dev/health   # → 200 {"status":"ok",...}
 - [ ] Screener returns results on staging (LLM interpreter + seeded data)
 - [ ] `stratoscan_probes` exists; `STAGING_DATABASE_URL` points at it
 - [ ] `python3 seed_probes_db.py` → **≥100 rows with AAPL + SPY** (verified live: 121)
-- [ ] `python3 run_probes.py` → **all 18 probes exit 0** (verified live)
+- [ ] `python3 run_probes.py` → **every probe exits 0** (verified live)
 - [ ] Probes DB isolated: prod row count unchanged; `stratoscan_staging` untouched
 
 ## Teardown

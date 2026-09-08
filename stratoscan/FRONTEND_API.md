@@ -24,8 +24,8 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 
 | Auth level | Meaning | Endpoints |
 |---|---|---|
-| `none` | Public (rate-limited only) | `/screen`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email` |
-| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/export`, `/auth/me`, `/auth/resend-verification` |
+| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email` |
+| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/me/personal` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -203,6 +203,28 @@ Response per symbol includes `total_return_pct`, `sharpe_ratio`,
 `alpha_pct`, `beta`, `excess_return_pct`, `buy_hold_*`, `monte_carlo`,
 `confidence_intervals`, `walk_forward`, `parameter_sensitivity`, `warnings`,
 `data_quality[]`.
+
+### `POST /backtest/async` and `GET /backtest/async/{job_id}` — long backtests (bearer)
+
+`POST /backtest/async` takes the same body as `/backtest` and returns
+`{job_id, status, phase}` immediately instead of blocking. Poll
+`GET /backtest/async/{job_id}` until `status` leaves `queued`/`running`:
+
+```json
+{"job_id": "…", "status": "running", "phase": "backtesting",
+ "done_symbols": ["AAPL"], "total_symbols": 5, "result": null, "error": null}
+```
+
+`status` is one of `queued` → `running` → `done` (with the full `/backtest`
+payload in `result`) | `error` | `interrupted`. `interrupted` means the server
+restarted mid-job — re-submit. Jobs are persisted (`backtest_jobs`), so a poll
+survives a restart.
+
+### `GET /me/personal` and `PUT /me/personal` — per-user saved state (bearer)
+
+`{watchlist: string[], saved_screeners: [...], recent_backtests: [...]}`.
+`PUT` replaces the whole document. Backed by the `user_data` table, so a
+user's watchlist and saved screeners follow them across devices.
 
 ### `POST /backtest/export` — same pipeline, CSV of closed trades (bearer)
 
