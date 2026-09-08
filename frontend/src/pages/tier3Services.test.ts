@@ -32,9 +32,7 @@ describe('Tier 3: async progress (demo mode)', () => {
   })
 
   it('backtestJobStatus throws in demo mode (demo has no background jobs)', async () => {
-    await expect(backtestJobStatus('demo')).rejects.toThrow(
-      'demo-mode backtest is synchronous',
-    )
+    await expect(backtestJobStatus('demo')).rejects.toThrow('demo-mode backtest is synchronous')
   })
 })
 
@@ -90,7 +88,10 @@ describe('Tier 3: CSV export (demo mode)', () => {
   it('exportBacktestCsv data rows have numeric buy_price and shares', async () => {
     const blob = await exportBacktestCsv(backtestReq)
     const text = await blob.text()
-    const dataRows = text.split('\n').slice(1).filter((l) => l.trim())
+    const dataRows = text
+      .split('\n')
+      .slice(1)
+      .filter((l) => l.trim())
     expect(dataRows.length).toBeGreaterThan(0)
 
     for (const row of dataRows) {
@@ -137,7 +138,10 @@ describe('Tier 3: CSV export (demo mode)', () => {
   it('exportScreenCsv data rows have valid symbols', async () => {
     const blob = await exportScreenCsv(screenReq)
     const text = await blob.text()
-    const dataRows = text.split('\n').slice(1).filter((l) => l.trim())
+    const dataRows = text
+      .split('\n')
+      .slice(1)
+      .filter((l) => l.trim())
     expect(dataRows.length).toBeGreaterThan(0)
 
     for (const row of dataRows) {
@@ -257,7 +261,11 @@ describe('Tier 3: compare mode contract', () => {
   })
 
   it('buildRequest has no symbols when no baseline is set', () => {
-    const baseline = null
+    // The assertion is load-bearing: with a plain annotation, TS's
+    // control-flow analysis still narrows a `const` initialized to `null`
+    // down to `null`, making the truthy branch below `never` and failing
+    // typecheck. `as` keeps the union so the ternary stays type-checkable.
+    const baseline = null as { results: Record<string, { symbol: string }> } | null
 
     const req: BacktestRequest = {
       query: 'momentum strategy',
@@ -459,7 +467,9 @@ describe('Tier 3: per-symbol data-age badge contract', () => {
   })
 
   it('is_stale defaults to false when absent', () => {
-    const item = {
+    // `is_stale` is declared optional so the absent-value read below is the
+    // documented contract rather than a typecheck error.
+    const item: { symbol: string; is_stale?: boolean; [k: string]: unknown } = {
       symbol: 'GOOG',
       initial_capital: 100000,
       final_value: 130000,
@@ -505,9 +515,7 @@ describe('Tier 3: async job status extended contract', () => {
     }
     expect(status.done_symbols).toHaveLength(2)
     expect(status.total_symbols).toBe(5)
-    expect(
-      (status.done_symbols?.length ?? 0) / (status.total_symbols ?? 1),
-    ).toBe(0.4)
+    expect((status.done_symbols?.length ?? 0) / (status.total_symbols ?? 1)).toBe(0.4)
   })
 
   it('done status has result and no error', () => {

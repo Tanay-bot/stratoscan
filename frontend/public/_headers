@@ -1,3 +1,9 @@
+# MIRROR ONLY — Vercel does NOT read this file.
+# `_headers` is a Cloudflare Pages / Netlify convention. Production headers are
+# served from vercel.json's "headers" block; this file is kept as a portable copy
+# for any static host that does read it. scripts/verify_security_headers.mjs pins
+# the two byte-for-byte, so edit BOTH or neither.
+
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.stratoscan.com https://stratoscan-api.fly.dev https://*.sentry.io; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self'; upgrade-insecure-requests
   X-Content-Type-Options: nosniff

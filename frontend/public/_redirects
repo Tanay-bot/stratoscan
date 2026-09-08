@@ -1,3 +1,5 @@
 # SPA fallback — let React Router own every path.
-# (API calls never hit Pages: VITE_API_URL points at the Fly.io origin directly.)
+# MIRROR ONLY: Vercel serves the SPA fallback from vercel.json's "rewrites".
+# Kept as a portable copy for static hosts that read _redirects.
+# (API calls never hit the static host: VITE_API_URL points at the Fly.io origin.)
 /*  /index.html  200

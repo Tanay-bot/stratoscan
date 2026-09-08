@@ -78,6 +78,15 @@ jobs:
       - name: Test
         run: npm test
 
+      # These two guards must live HERE, not only in frontend-ci.yml: the
+      # deploy job below depends on THIS gate, so a check that runs only in
+      # the other workflow cannot block a bad deploy.
+      - name: Walk-forward scale guard
+        run: node scripts/verify_walkforward_scale.mjs
+
+      - name: Security header guard
+        run: node scripts/verify_security_headers.mjs
+
       - name: Build (production — demo-mode guard + Sentry sourcemap upload on main only)
         run: npm run build
 
@@ -112,7 +121,7 @@ jobs:
 
       - name: Healthcheck deployed frontend
         run: |
-          URL="${VERCEL_PRODUCTION_URL:-${{ steps.deploy.outputs.deployment-url }}"
+          URL="${VERCEL_PRODUCTION_URL:-${{ steps.deploy.outputs.deployment-url }}}"
           echo "Healthchecking ${URL}"
           for i in $(seq 1 10); do
             if curl -sfL --max-time 20 "${URL}" -o /tmp/deploy-index.html; then

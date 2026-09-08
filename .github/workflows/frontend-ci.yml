@@ -58,6 +58,9 @@ jobs:
       - name: Walk-forward scale guard
         run: node scripts/verify_walkforward_scale.mjs
 
+      - name: Security header guard
+        run: node scripts/verify_security_headers.mjs
+
       - name: Build (production — demo-mode guard active)
         run: npm run build
         env:
