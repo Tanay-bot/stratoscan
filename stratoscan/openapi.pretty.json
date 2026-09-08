@@ -571,6 +571,87 @@
         }
       }
     },
+    "/backtest/async": {
+      "post": {
+        "tags": [
+          "Backtesting"
+        ],
+        "summary": "Start an async backtest (live per-symbol progress)",
+        "description": "Start a backtest and return a job_id to poll for progress.\n\nThe synchronous ``/backtest`` blocks for the whole run (cold-cache\ndownloads can take minutes). This endpoint validates the request, kicks\noff the identical pipeline in a background thread, and returns\nimmediately with ``job_id``. Poll ``GET /backtest/async/{job_id}`` for\nper-symbol status; the payload shape on completion is identical to the\nsynchronous endpoint.",
+        "operationId": "backtest_async_backtest_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backtest/async/{job_id}": {
+      "get": {
+        "tags": [
+          "Backtesting"
+        ],
+        "summary": "Poll an async backtest's live progress",
+        "description": "Poll an async backtest job for its current progress and, when done,\nthe full result (identical payload shape to ``/backtest``).",
+        "operationId": "backtest_async_status_backtest_async__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/backtest/export": {
       "post": {
         "tags": [
@@ -1153,7 +1234,7 @@
           "Admin"
         ],
         "summary": "Job monitor summary \u2014 admin only",
-        "description": "Live job-monitor summary for the admin dashboard's jobs panel.\n\nSame payload as the public ``GET /ops/jobs`` but admin-gated \u2014 the\ndashboard renders staleness flags, consecutive failures and the\nscheduler heartbeat without exposing the surface to anonymous users.",
+        "description": "Live job-monitor summary for the admin dashboard's jobs panel.\n\nSame payload as ``GET /ops/jobs`` \u2014 which is itself admin-gated, not\npublic \u2014 under an ``/admin``-prefixed path so the dashboard can fetch all\nof its panels from one namespace. Staleness flags, consecutive failures\nand the scheduler heartbeat are never exposed to anonymous users.",
         "operationId": "admin_jobs_admin_jobs_get",
         "responses": {
           "200": {
@@ -1541,6 +1622,86 @@
             ],
             "title": "End Date",
             "description": "Backtest end date (YYYY-MM-DD). Default: today."
+          },
+          "portfolio_allocation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Allocation",
+            "description": "How the shared capital pool is split across the tested stocks: equal | risk_based (inverse-volatility weights). Default: equal."
+          },
+          "rebalance_frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rebalance Frequency",
+            "description": "Rebalance schedule for the portfolio: none | monthly | quarterly | yearly. Default: none (weights drift)."
+          },
+          "dividend_reinvest": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Reinvest",
+            "description": "Enable cash-dividend accounting (raw prices, dividends booked as cash on ex-dates). True = reinvest dividends (DRIP), False = hold as cash income. None = off (adjusted prices)."
+          },
+          "borrow_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 20.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Borrow Rate Pct",
+            "description": "Annualized short borrow fee (%%), charged daily on the mark value of open short positions. Only meaningful with allow_short=true."
+          },
+          "max_sector_exposure": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Sector Exposure",
+            "description": "Diversification knob: max stocks from the SAME sector the engine may pick (e.g. 2 = at most 2 tech names). The screener ranks by score, so top-10 can be 10 tech names without this."
+          },
+          "symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbols",
+            "description": "Exact symbols to backtest (skips the screener). Compare mode pins strategy B to strategy A's picks for a true A/B."
           }
         },
         "type": "object",
@@ -1583,6 +1744,18 @@
               }
             ],
             "title": "Message"
+          },
+          "portfolio": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio"
           }
         },
         "type": "object",
@@ -1768,6 +1941,16 @@
             "title": "Data Quality",
             "default": []
           },
+          "dividends_received": {
+            "type": "number",
+            "title": "Dividends Received",
+            "default": 0.0
+          },
+          "borrow_fees_paid": {
+            "type": "number",
+            "title": "Borrow Fees Paid",
+            "default": 0.0
+          },
           "monte_carlo": {
             "anyOf": [
               {
@@ -1815,6 +1998,22 @@
               }
             ],
             "title": "Parameter Sensitivity"
+          },
+          "data_age_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Age Minutes"
+          },
+          "is_stale": {
+            "type": "boolean",
+            "title": "Is Stale",
+            "default": false
           }
         },
         "type": "object",

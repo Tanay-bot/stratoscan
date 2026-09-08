@@ -3749,9 +3749,10 @@ async def admin_jobs(
 ):
     """Live job-monitor summary for the admin dashboard's jobs panel.
 
-    Same payload as the public ``GET /ops/jobs`` but admin-gated — the
-    dashboard renders staleness flags, consecutive failures and the
-    scheduler heartbeat without exposing the surface to anonymous users.
+    Same payload as ``GET /ops/jobs`` — which is itself admin-gated, not
+    public — under an ``/admin``-prefixed path so the dashboard can fetch all
+    of its panels from one namespace. Staleness flags, consecutive failures
+    and the scheduler heartbeat are never exposed to anonymous users.
     """
     from src.job_monitor import JobMonitor, get_job_monitor_store
 

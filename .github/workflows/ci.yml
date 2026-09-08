@@ -60,6 +60,11 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      # Committed artifacts vs the code they describe: the OpenAPI snapshots
+      # and RELEASE_GATE.md's probe table. Both had already drifted.
+      - name: Docs contract guard (OpenAPI snapshots + probe inventory)
+        run: python -m tests.test_docs_contract
+
       - name: Frozen golden set (simulation accuracy gate)
         run: python -m tests.test_backtest_golden
 
