@@ -1,5 +1,8 @@
 # Stratoscan — Staging Environment (P0-0 + P0-12)
 
+> **Owner:** this file is the source of truth for the staging and probes databases — creating, seeding and isolating them.
+> The probe list → `RELEASE_GATE.md`. Secrets → `SECRETS.md`.
+
 A fully isolated staging environment where E2E tests, `verify_*.py` probes,
 and the release-gate rounds (R2–R6) run **without touching production data
 or tripping production rate limits**. Created because the release checklist

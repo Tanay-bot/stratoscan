@@ -1,5 +1,8 @@
 # Stratoscan Backtester Testing Plan
 
+> **Owner:** this file is the source of truth for the backtester verification strategy — what each phase proves and how.
+> The status table near the end is a dated snapshot, not live state. Probe inventory → `RELEASE_GATE.md`.
+
 > **Goal:** Prove that what the screen shows is what actually happened — every metric,
 > curve, and trade in the UI is verifiable against the raw data and the simulation math.
 > **Scope:** Backtester first (this doc), then screener, auth, enrichment, and UI display.

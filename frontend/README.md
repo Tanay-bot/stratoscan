@@ -1,5 +1,8 @@
 # Stratoscan Frontend
 
+> **Owner:** this file is the source of truth for how to develop the frontend — Sentry, SEO, accessibility, auth behavior, Vercel project setup.
+> Headers/CSP → `DEPLOYMENT.md`. HTTP contract → `../stratoscan/FRONTEND_API.md` (the server wins). Visual system → `../DESIGN.md`.
+
 React + Vite single-page app for Stratoscan — an AI-powered stock screener and
 backtesting platform.
 

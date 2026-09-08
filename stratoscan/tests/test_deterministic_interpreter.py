@@ -17,14 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.deterministic_interpreter import (  # noqa: E402
     CONFIDENCE_THRESHOLD,
     DeterministicInterpreter,
-    SECTOR_ALIASES,
-    MARKET_CAP_PRESETS,
-    SYNONYM_MAP,
 )
-from src.interpreter import (  # noqa: E402
-    ComparisonOp,
-    InterpretedQuery,
-)
+from src.interpreter import InterpretedQuery  # noqa: E402
 
 parser = DeterministicInterpreter()
 

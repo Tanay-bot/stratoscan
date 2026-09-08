@@ -1,5 +1,10 @@
 # Stratoscan API — Frontend Contract
 
+> **Owner:** this file is the source of truth for the HTTP API — endpoints, auth
+> levels, pagination, error shapes and units. Architecture and internals →
+> `../CLAUDE.md`. Running the service → `README.md`. Rate-limit *design* →
+> `../CLAUDE.md` §10 (the budgets themselves are listed in §7 below).
+
 This is the single source of truth for the HTTP API the frontend consumes.
 Every JSON endpoint, auth requirement, pagination rule, and error shape lives
 here. The backend *also* serves a machine-readable manifest at `GET /meta`
@@ -126,7 +131,7 @@ The screener's page responses include the full contract:
   "description": "...",
   "docs": {"/docs": "Swagger UI", "/redoc": "ReDoc"},
   "meta": "/meta",
-  "endpoint_count": 25
+  "endpoint_count": 33
 }
 ```
 Use at boot to confirm the API is reachable and link to docs/meta.

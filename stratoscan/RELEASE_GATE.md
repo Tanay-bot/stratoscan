@@ -1,5 +1,8 @@
 # Stratoscan — Release Gate
 
+> **Owner:** this file is the source of truth for the release gate and the probe inventory — the probe table here is the canonical list.
+> `run_probes.py` defines what actually runs, and `tests/test_docs_contract.py` fails if the table below drifts from it. Staging setup → `STAGING.md`. Drill detail → `FAILURE_DRILLS.md`.
+
 The release gate is the **last line of defense before any public push**: it
 runs all 18 behavior probes against the isolated staging environment and
 **blocks deployment if any probe fails**.

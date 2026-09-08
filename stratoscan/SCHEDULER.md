@@ -1,5 +1,8 @@
 # Stratoscan — Scheduler Watchdog & Operations
 
+> **Owner:** this file is the source of truth for the scheduler process, job cadence, heartbeat, staleness rules and the watchdog.
+> The cadence constants themselves live in `src/scheduler.py` and `job_monitor.JOB_DEFINITIONS` and must stay in sync with each other; this file documents them. Alert delivery config → `SECRETS.md`.
+
 This document describes how the background data-refresh scheduler runs, how a
 silently-dead scheduler is detected, and how the system recovers. Read this
 before touching the scheduler in production.

@@ -1,5 +1,8 @@
 # Stratoscan — Deployment Runbook
 
+> **Owner:** this file is the source of truth for the manual deploy path for both halves of the stack.
+> The GitHub Actions workflows are the automated equivalent — **when they and this document disagree, the workflow files win**, because they are what actually runs. Frontend headers/CSP rationale → `frontend/DEPLOYMENT.md`. Secrets and rotation → `stratoscan/SECRETS.md`.
+
 **Stack:** Vercel (frontend) + Fly.io (backend, ~$2–5/mo always-on).
 
 > ℹ️ This runbook documents the **manual** deploy path (great for first setup

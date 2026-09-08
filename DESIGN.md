@@ -2,6 +2,10 @@
 
 <!-- impeccable:design-schema 1 -->
 
+> **Owner:** this file is the source of truth for the frontend's visual system —
+> tokens, glass system, components, motion. Frontend development → `frontend/README.md`.
+> Product intent (historical) → `PRODUCT.md`.
+
 Recorded from the built world (`frontend/`), not from intention. This describes what ships.
 
 ## World

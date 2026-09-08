@@ -6,6 +6,9 @@
 > This file is the single source of truth for working in this repository. It is deliberately
 > long: read the section you need, not the whole thing.
 
+> **Owner:** this file is the source of truth for how this repo is built and the rules for changing it — architecture, module reference, schemas, gotchas.
+> HTTP contract → `stratoscan/FRONTEND_API.md`. Deploying → `DEPLOY.md`. Scheduler → `stratoscan/SCHEDULER.md`. Release gate → `stratoscan/RELEASE_GATE.md`. Frontend visual system → `DESIGN.md`.
+
 ---
 
 ## Table of contents

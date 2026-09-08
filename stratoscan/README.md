@@ -1,5 +1,8 @@
 # Stratoscan 🚀
 
+> **Owner:** this file is the source of truth for running and operating the backend service.
+> HTTP contract → `FRONTEND_API.md`. Architecture and module reference → `../CLAUDE.md`. Scheduler → `SCHEDULER.md`. Release gate → `RELEASE_GATE.md`.
+
 **AI-powered stock screener and backtesting platform.**
 
 > Not a stock-picking service. A bridge from idea to candidate list.

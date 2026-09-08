@@ -2,6 +2,9 @@
 
 > **Bridge from idea to candidate list.** A natural-language market terminal with 10 years of backtested history — free, forever.
 
+> **Owner:** this file is the source of truth for what Stratoscan is, and the entry points for running it.
+> Working in the code → `CLAUDE.md`. HTTP contract → `stratoscan/FRONTEND_API.md`. Deploying → `DEPLOY.md`. Scheduler cadence → `stratoscan/SCHEDULER.md`.
+
 Stratoscan turns plain-English investing ideas into ranked, backtested candidate lists. Type `"find undervalued small-cap tech stocks with rising momentum"` and get real US stocks filtered, scored, and backtested against SPY — no spreadsheets, no query language, no paywall.
 
 ---

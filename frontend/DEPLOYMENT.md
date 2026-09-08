@@ -1,5 +1,8 @@
 # Stratoscan Frontend — Deployment & Security Headers
 
+> **Owner:** this file is the source of truth for the frontend's security headers and CSP — what ships, why, and how to verify it.
+> The headers are served from `vercel.json`; `public/_headers` is a mirror. `npm run verify:headers` enforces both. Everything else about deploying → `../DEPLOY.md`.
+
 This document covers how the frontend is deployed to **Vercel** and how the
 **Content-Security-Policy (CSP)** and hardening headers are applied and kept
 correct.

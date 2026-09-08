@@ -1,5 +1,8 @@
 # Stratoscan — Failure-Injection Drills (P1-7)
 
+> **Owner:** this file is the source of truth for the four failure-injection drills and their expected degradation behavior.
+> Probe inventory and gate wiring → `RELEASE_GATE.md`.
+
 Prove the system **degrades gracefully** when upstreams die. Each drill is
 repeatable, documents expected outcomes, and is wired into the release gate as
 a hermetic probe (`verify_failure_drills.py`, probe #7 of the 18).

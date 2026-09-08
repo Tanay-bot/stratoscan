@@ -1,5 +1,8 @@
 # Stratoscan — Secrets Management Runbook
 
+> **Owner:** this file is the source of truth for what secrets exist, how to rotate them, and how CI gets them.
+> Deploy steps → `../DEPLOY.md`. Env template rules are enforced by `validate_env_template()`; `.env.example` is the template itself.
+
 > Tier 2 ops gap #5: env-file secrets are fine for launch, but there was no
 > documented rotation path or CI secret wiring. This file closes that gap.
 
