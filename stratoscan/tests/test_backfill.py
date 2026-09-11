@@ -214,7 +214,7 @@ def main() -> int:
     db6 = FakeBacktestDB()
     with mock.patch.object(backfill, "BacktestDB", return_value=db6):
         stats6 = build_backfill_history(
-            symbols=["NVDA"], years=2, verify=False,
+            symbols=["NVDA"], years=2, verify=False, fetch_fn=_fake_fetch,
         )
     check("wrapper returns stats", stats6.get("backfilled") == 1, str(stats6))
     check("owned DB closed", db6.closed is True)

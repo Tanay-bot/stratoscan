@@ -29,6 +29,10 @@ from unittest import mock
 # Rate limits OFF for this suite (see tests/test_auth.py for why) — the
 # numbers themselves are locked in tests/test_rate_limits.py.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Pin the LLM path: this suite measures LLM-call caching. The deterministic
+# parser answers these queries at confidence 1.00 and returns before any LLM
+# call is made, which would make every assertion below vacuous.
+os.environ["USE_DETERMINISTIC_INTERPRETER"] = "false"
 
 from src.cache import TTLCache
 from src.config import settings

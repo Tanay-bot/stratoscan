@@ -338,6 +338,9 @@ def build_backfill_history(
     years: Optional[int] = None,
     limit: Optional[int] = None,
     verify: bool = True,
+    fetch_fn: Optional[Callable[..., Any]] = None,
+    store_fn: Optional[Callable[..., Any]] = None,
+    db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """CLI entry point: run one backfill cycle, then report (Tier 3).
 
@@ -349,6 +352,10 @@ def build_backfill_history(
         years: Years of history (default 10).
         limit: Max symbols from the fallback selectors.
         verify: Run the fresh-download cross-check (default True).
+        fetch_fn: Override the OHLCV fetcher (tests inject a fake so this
+            stays hermetic; None -> the real yfinance downloader).
+        store_fn: Override the row writer (None -> the real one).
+        db: Pre-built backtest DB (None -> this function owns and closes one).
 
     Returns:
         The stats dict from :func:`backfill_history`.
@@ -358,4 +365,7 @@ def build_backfill_history(
         years=years or 10,
         limit=limit,
         verify=verify,
+        fetch_fn=fetch_fn,
+        store_fn=store_fn,
+        db=db,
     )

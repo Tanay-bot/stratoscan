@@ -33,6 +33,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # suite never touches the network or real rate-limit counters.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 os.environ["REDIS_RATE_LIMIT_ENABLED"] = "false"
+# Pin the LLM path so the get_router mock below actually controls the
+# strategy. The deterministic parser answers this suite's query at
+# confidence 1.00 without consulting the router, and the rules it emits
+# ('rsi < 35' AND 'price > sma_50') are never both true on the sine
+# fixture -- so the suite would measure nothing.
+os.environ["USE_DETERMINISTIC_INTERPRETER"] = "false"
 
 import numpy as np
 import pandas as pd
