@@ -133,6 +133,17 @@ class Settings(BaseSettings):
     # old hardcoded 3s produced false "unhealthy" alarms.
     db_connect_timeout: int = 15
 
+    # ── London Strategic Edge (alternative backtest history source) ─────
+    # Optional. Unset (the default) = nothing changes; yfinance stays the
+    # only history source. When set, src/lse_source.py can backfill the
+    # backtest DB from the LSE vault (official API, US stocks to 2003).
+    # LICENCE: LSE permits use for your own research/trading/model training
+    # but forbids redistribution — backfilling your own backtest DB is fine,
+    # serving LSE prices to end users is NOT. Never wire this into the
+    # screener or any user-facing price display.
+    lse_api_key: str = ""
+    lse_timeout: float = 60.0
+
     # ── PostgreSQL (Primary Screener Database) ──────────────────────────
     # Direct connection string for any PostgreSQL provider:
     #   Supabase: postgresql://postgres.qjdxapyxhpdkikzdtuzl:<pw>@aws-0-us-west-1.pooler.supabase.com:5432/postgres
