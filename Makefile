@@ -68,28 +68,21 @@ ps:
 # /proc/1/cmdline answers the same question more directly, so it is used instead.
 verify:
 	@echo "── /health ──────────────────────────────────────────────"
-	@curl -fsS http://localhost:8000/health | head -c 200; echo
+	@body=$$(curl -fsS http://localhost:8000/health); \
+		echo "  $$body"; \
+		echo "$$body" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('status')=='ok' and d.get('database_alive') else 1)" 2>/dev/null \
+			|| { echo "  ✗ /health is not status=ok with database_alive=true"; exit 1; }; \
+		echo "  ✓ /health ok, database_alive true"
 	@echo
 	@echo "── the scheduler is a scheduler, not a second API ──────"
-	@printf '  PID 1: '
-	@$(COMPOSE) exec -T scheduler sh -c 'cat /proc/1/cmdline | tr "\000" " "' 2>/dev/null || echo "(exec failed)"
-	@echo
-	@$(COMPOSE) exec -T scheduler sh -c 'cat /proc/1/cmdline | tr "\000" " "' 2>/dev/null \
-		| grep -q "src.main scheduler" \
-		&& echo "  ✓ runs the scheduler" \
-		|| { echo "  ✗ PID 1 is not the scheduler"; exit 1; }
-	@$(COMPOSE) exec -T scheduler sh -c 'cat /proc/1/cmdline | tr "\000" " "' 2>/dev/null \
-		| grep -q "uvicorn" \
-		&& { echo "  ✗ PID 1 is uvicorn — the exact bug task 005 exists to prevent"; exit 1; } \
-		|| echo "  ✓ not uvicorn"
+	@cmd=$$($(COMPOSE) exec -T scheduler sh -c 'cat /proc/1/cmdline | tr "\000" " "' 2>/dev/null); \
+		echo "  PID 1: $$cmd"; \
+		echo "$$cmd" | grep -q "src.main scheduler" || { echo "  ✗ PID 1 is not the scheduler"; exit 1; }
 	@echo
 	@echo "── Redis is really in use (not the in-memory fallback) ──"
-	@$(COMPOSE) logs api 2>/dev/null | grep -iE "redis|rate.?limit store" | tail -5 || true
-	@if $(COMPOSE) logs api 2>/dev/null | grep -qiE "falling back to the in-memory|in-memory store"; then \
-		echo "  ✗ API fell back to the in-memory rate-limit store"; exit 1; \
-	else \
-		echo "  ✓ no in-memory fallback logged"; \
-	fi
+	@log=$$($(COMPOSE) logs api 2>/dev/null); \
+		echo "$$log" | grep -m1 "Upstash Redis backend" || { echo "  ✗ no 'Upstash Redis backend' line — Redis is not in use"; exit 1; }; \
+		if echo "$$log" | grep -qE "falling back to the in-memory|in-memory store"; then echo "  ✗ fell back to the in-memory store"; exit 1; fi
 	@echo
 	@echo "── mailpit ──────────────────────────────────────────────"
 	@curl -fsS http://localhost:8025 >/dev/null && echo "  ✓ mailpit up (nothing will arrive in it — see .env.local.example)"
