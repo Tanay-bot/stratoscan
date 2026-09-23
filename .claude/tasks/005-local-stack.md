@@ -84,8 +84,15 @@ to prevent.
 
 ### Service 5 — `mailpit`
 
-`axllent/mailpit`. SMTP on 1025, web UI on 8025. Verification emails land there instead
-of being sent. Set the app's mail settings to point at it.
+`axllent/mailpit`. SMTP on 1025, web UI on 8025.
+
+**Correction to this section's original wording.** It said "verification emails land
+there instead of being sent. Set the app's mail settings to point at it." That cannot be
+done inside this task, and the instruction contradicted the non-goals below.
+`src/emails.py` posts to `https://api.sendgrid.com/v3/mail/send` over HTTPS and has no
+SMTP path at all, so there is no mail setting to point anywhere. Run the service so the
+arrangement is complete, and say plainly in `.env.local.example` that nothing will arrive
+in it until `src/emails.py` grows an SMTP sender — which is its own task.
 
 ### `.env.local.example`
 
@@ -146,12 +153,17 @@ curl -fsS http://localhost:8000/health | head -c 200 ; echo
 **The assertion that matters — prove the scheduler is a scheduler:**
 
 ```bash
-# The scheduler container must run the scheduler and NOT uvicorn.
-docker compose exec -T scheduler ps ax | grep -c "src.main scheduler"   # expect >= 1
-docker compose exec -T scheduler ps ax | grep -c "uvicorn"              # expect 0
+# The scheduler container's PID 1 must BE the scheduler, not uvicorn.
+# NOTE: do not reach for `ps` — python:3.14-slim ships no procps, and installing
+# it would mean editing the Dockerfile, which this task forbids. PID 1's cmdline
+# answers the question directly, and more honestly: the entrypoint `exec`s, so
+# PID 1 *is* the workload rather than a shell that spawned it.
+docker compose exec -T scheduler sh -c 'tr "\000" " " < /proc/1/cmdline'
+# expect:  python -m src.main scheduler
+# and specifically NOT uvicorn
 ```
 
-If the second number is not 0 you have reproduced the exact bug this task was written
+If that prints uvicorn you have reproduced the exact bug this task was written
 to avoid — stop and say so rather than working around it.
 
 **Prove Redis is really being used, not silently bypassed:**
@@ -186,3 +198,15 @@ first — particularly the scheduler service and the Redis wiring.
 
 This needs Docker with the Compose plugin (`docker compose version`). If it is not
 installed, stop and say so — do not substitute a different orchestration tool.
+
+`FINNHUB_KEY_01` must be non-empty in `.env.local`, even as an obvious placeholder.
+`DataRefreshScheduler.__init__` calls `initialize_client_pool()` (`scheduler.py:85`),
+which raises `ValueError` on an empty key list — so with no key the scheduler container
+dies on boot and the day's one load-bearing assertion cannot run. The API is unaffected:
+it serves `/health` with no keys at all, because the screener makes zero external calls.
+
+`RATE_LIMIT_BYPASS_IPS` must contain `127.0.0.1`. The container's own Docker healthcheck
+polls `/health` every 5s from loopback; `/health` is in the `read` bucket
+(`_scope_for_path` has no exemption for it), whose daily cap is 1,000. The 1,001st
+request 429s, `urlopen` raises, and the API container reports **unhealthy after 83
+minutes** while serving perfectly. Measured, not estimated — see `005-review.md`.
