@@ -1,0 +1,174 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stratoscan — local, production-shaped stack
+#
+#   make up        # build + start everything, wait until /health is ok
+#   make down      # stop and DELETE volumes (a true reset)
+#   make rebuild   # down, then up, from zero
+#
+# The value of this file is not that it runs Stratoscan locally — it is that it
+# runs it ARRANGED THE WAY PRODUCTION IS ARRANGED: the API and the scheduler are
+# two separate containers from one image, and every external dependency the app
+# talks to (three logical databases, Redis, a mailbox) is present as a real
+# service rather than stubbed out. The gap between "works on my laptop" and
+# "works on deploy" is usually exactly this arrangement, so getting it wrong
+# locally just hides the surprise until it is expensive.
+#
+# Every credential below is a throwaway local value. Nothing here is a
+# deployment; real secrets live in the platform's secret store.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+name: stratoscan-local
+
+# ── One image, two roles ──────────────────────────────────────────────────────
+# `api` and `scheduler` share a build context AND an image name, so Compose
+# builds once and both services run from the same image. The role is chosen by
+# the command argument, which stratoscan/docker-entrypoint.sh dispatches on.
+x-app: &app
+  build:
+    context: ./stratoscan
+  image: stratoscan-local:latest
+  env_file:
+    - .env.local
+
+services:
+
+  # ── Data: one server, three logical databases ───────────────────────────────
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: stratoscan
+      POSTGRES_PASSWORD: stratoscan
+      # The primary database. The other two are created by scripts/initdb.sql.
+      POSTGRES_DB: stratoscan
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stratoscan -d stratoscan"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ── Redis, in the shape the app actually speaks ─────────────────────────────
+  # src/redis_ratelimit.py is NOT a RESP client: it POSTs JSON to /multi-exec and
+  # /pipeline with an `Authorization: Bearer` header — the Upstash REST API.
+  # Plain redis:alpine cannot answer that, and the failure would be SILENT:
+  # get_rate_limit_store() fails open to the in-memory store by design, so the
+  # app would look perfectly healthy while the Redis path went entirely untested.
+  # That silent success is the outcome this stack exists to prevent, hence the
+  # Upstash-compatible HTTP shim in front of real Redis.
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis-http:
+    image: hiett/serverless-redis-http:latest
+    environment:
+      # The proxy validates this token against the Bearer header the app sends.
+      # It must equal UPSTASH_REDIS_REST_TOKEN in .env.local.
+      SRH_MODE: env
+      SRH_TOKEN: local-dev-token
+      SRH_CONNECTION_STRING: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # This matters more than it looks. The API resolves its rate-limit store
+      # ONCE, PINGs Redis, and caches the result for the life of the process
+      # (`_store_resolved` in src/redis_ratelimit.py). If the proxy is not yet
+      # answering when that first resolution happens, the app permanently pins
+      # the in-memory store and logs a warning nobody reads. So `api` waits for
+      # this to be HEALTHY, not merely started. A TCP accept is the cheapest
+      # honest proof the REST listener is up (this image ships busybox `nc`;
+      # it has no curl, and a GET on "/" may legitimately 404).
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 80"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 2s
+
+  # ── Mail catcher ────────────────────────────────────────────────────────────
+  # SMTP on 1025, web UI on 8025.
+  #
+  # ⚠️  KNOWN GAP: the app mails through SendGrid's HTTP API
+  # (`POST https://api.sendgrid.com/v3/mail/send`, hardcoded in src/emails.py)
+  # and has NO SMTP path, so verification emails will NOT land here today. The
+  # service is in the stack so the arrangement is complete and the day
+  # src/emails.py grows an SMTP sender, nothing else has to change. Wiring it
+  # would mean editing src/, which task 005's non-goals forbid.
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  # ── The API (role: api) ─────────────────────────────────────────────────────
+  # The entrypoint runs `alembic upgrade head` through its REAL retry loop and
+  # then uvicorn, so the migration path exercised locally is the same one
+  # production uses — not migrations run by hand off to the side.
+  api:
+    <<: *app
+    command: api
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-http:
+        condition: service_healthy
+    healthcheck:
+      # /health answers 200 EVEN WHEN DEGRADED — it reports its state in the
+      # body ("status": "degraded", "database_alive": false). Checking the
+      # status code alone would let the scheduler start against a database that
+      # is not answering, so this asserts the body.
+      test: ["CMD", "python", "-c", "import json,urllib.request,sys; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)); sys.exit(0 if d.get('status')=='ok' and d.get('database_alive') else 1)"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 20s
+
+  # ── The scheduler (role: scheduler) ─────────────────────────────────────────
+  # THE POINT OF THIS FILE. Same image as `api`, command `scheduler`.
+  #
+  # Until the entrypoint learned to dispatch on its arguments, this service
+  # would have silently started A SECOND API: two containers reporting healthy,
+  # zero schedulers, and refresh jobs simply never running. `make verify` exists
+  # mainly to prove that is not what is happening here.
+  #
+  # The ordering is not cosmetic either. Migrations are the API's job — the
+  # entrypoint deliberately does NOT run them for the scheduler role, because two
+  # containers racing `alembic upgrade head` against one database is a
+  # lock-contention bug. The schema must exist before the scheduler's first job,
+  # so this waits for the API to be genuinely healthy.
+  #
+  # Exactly ONE replica, ever (golden rule #1). Do not add deploy.replicas.
+  scheduler:
+    <<: *app
+    command: scheduler
+    # The image's Dockerfile HEALTHCHECK probes http://127.0.0.1:8000/health — an
+    # HTTP port only the API role serves. Inherited unchanged, this container
+    # would report "unhealthy" forever while working perfectly, which is exactly
+    # the kind of misleading signal this stack exists to remove. Assert the
+    # opposite invariant instead: this container's main process is the scheduler,
+    # and it is not uvicorn. -a runs the match against the NUL-separated cmdline.
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qa src.main /proc/1/cmdline && ! grep -qa uvicorn /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:

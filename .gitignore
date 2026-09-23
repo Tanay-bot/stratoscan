@@ -4,6 +4,9 @@
 # ── macOS ──────────────────────────────────────────────────────────────
 .DS_Store
 
+# ── Local stack secrets (copy .env.local.example → .env.local) ─────────
+.env.local
+
 # ── Local process artifacts ────────────────────────────────────────────
 *.pid
 
