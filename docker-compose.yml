@@ -161,7 +161,7 @@ services:
     # opposite invariant instead: this container's main process is the scheduler,
     # and it is not uvicorn. -a runs the match against the NUL-separated cmdline.
     healthcheck:
-      test: ["CMD-SHELL", "grep -qa scheduler /proc/1/cmdline && ! grep -qa uvicorn /proc/1/cmdline"]
+      test: ["CMD-SHELL", "grep -qa src.main /proc/1/cmdline && ! grep -qa uvicorn /proc/1/cmdline"]
       interval: 30s
       timeout: 5s
       retries: 3
