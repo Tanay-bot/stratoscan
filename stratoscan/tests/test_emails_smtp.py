@@ -66,11 +66,6 @@ class _FakeResponse:
         return False
 
 
-def _sendgrid_ok(request, timeout=10):
-    """The SendGrid success path (202 Accepted)."""
-    return _FakeResponse()
-
-
 def _capture_sendgrid(request, timeout=10):
     """Record what the SendGrid path would have posted, then succeed."""
     _captured["url"] = request.full_url
