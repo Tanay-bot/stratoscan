@@ -1,9 +1,13 @@
-"""Email service for Stratoscan (SendGrid Web API, stdlib-only).
+"""Email service for Stratoscan (stdlib-only: SendGrid Web API or SMTP).
+
+Two transports, one contract. SendGrid's REST endpoint (``POST
+/v3/mail/send``) is called directly via ``urllib``; SMTP goes through
+``smtplib`` — neither needs an SDK or a mail library, matching the
+project's zero-dependency philosophy (JWT via hmac, Redis via urllib,
+etc.). ``SMTP_HOST`` selects between them: set it to route mail over SMTP
+(a local mail catcher in the dev stack), leave it blank to use SendGrid.
 
 Signup verification: every new account gets an emailed verification link.
-SendGrid's REST endpoint (``POST /v3/mail/send``) is called directly via
-``urllib`` — no SDK dependency, matching the project's zero-dependency
-philosophy (JWT via hmac, Redis via urllib, etc.).
 
 Flow:
   1. ``/auth/register`` creates the account with ``email_verified=False``,
@@ -29,8 +33,10 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import smtplib
 import urllib.error
 import urllib.request
+from email.message import EmailMessage
 from typing import Optional
 
 from src.config import settings
@@ -82,10 +88,13 @@ def send_email(
     text_body: str,
     html_body: Optional[str] = None,
 ) -> bool:
-    """Send a transactional email through the SendGrid Web API.
+    """Send a transactional email over the configured transport.
 
-    Pure stdlib: builds the JSON payload, POSTs it to ``/v3/mail/send``
-    with ``Authorization: Bearer <SENDGRID_API_KEY>``.
+    SMTP when ``SMTP_HOST`` is set, otherwise the SendGrid Web API. Both
+    paths honour the same contract, so no caller branches on the transport.
+
+    SendGrid path, pure stdlib: builds the JSON payload, POSTs it to
+    ``/v3/mail/send`` with ``Authorization: Bearer <SENDGRID_API_KEY>``.
 
     Args:
         to_email: Recipient address.
@@ -99,6 +108,9 @@ def send_email(
         failure (unconfigured key, network error, API error). Never raises
         — callers use the boolean to decide how to degrade.
     """
+    if settings.smtp_host:
+        return _send_via_smtp(to_email, subject, text_body, html_body)
+
     if not settings.sendgrid_api_key:
         logger.warning(
             "SendGrid not configured (SENDGRID_API_KEY missing) — email to %s skipped",
@@ -195,3 +207,54 @@ def send_verification_email(
         "<p>If you didn't create a Stratoscan account, you can ignore this email.</p>"
     )
     return send_email(to_email, subject, text, html_body=html)
+
+
+def _send_via_smtp(
+    to_email: str,
+    subject: str,
+    text_body: str,
+    html_body: Optional[str] = None,
+) -> bool:
+    """Send a transactional email over SMTP (``smtplib``, stdlib).
+
+    Selected by ``SMTP_HOST`` — see ``send_email`` for the dispatch.
+
+    Args:
+        to_email: Recipient address.
+        subject: Email subject line.
+        text_body: Plain-text body.
+        html_body: Optional HTML body. Attached as an ``alternative``
+            part, which yields ``multipart/alternative`` with the
+            plain-text part FIRST — the ordering clients use to pick a
+            rendering.
+
+    Returns:
+        True if the relay accepted the message; False on any failure
+        (unreachable host, TLS/AUTH failure, timeout). Never raises: the
+        same contract as the SendGrid path, because ``/auth/register``
+        treats a failed send as non-fatal and reports ``email_sent``.
+    """
+    message = EmailMessage()
+    message["To"] = to_email
+    message["From"] = settings.email_from_address
+    message["Subject"] = subject
+    message.set_content(text_body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
+
+    try:
+        with smtplib.SMTP(
+            settings.smtp_host,
+            settings.smtp_port,
+            timeout=SENDGRID_TIMEOUT,  # shared outbound-mail timeout
+        ) as smtp:
+            if settings.smtp_starttls:
+                smtp.starttls()
+            if settings.smtp_username:
+                smtp.login(settings.smtp_username, settings.smtp_password)
+            smtp.send_message(message)
+    except Exception as e:
+        logger.warning("SMTP send failed for %s: %s", to_email, e)
+        return False
+    logger.info("Email sent via SMTP to %s", to_email)
+    return True

@@ -231,6 +231,27 @@ class Settings(BaseSettings):
     email_verification_required: bool = False
     email_verification_token_ttl_hours: int = 24  # link expires after 24h
 
+    # ── SMTP transport (alternative to the SendGrid API) ─────────────
+    # SMTP_HOST is the switch: when it is non-empty, src/emails.py sends
+    # over SMTP via smtplib and SENDGRID_API_KEY is ignored entirely. The
+    # caller-facing contract does not change (returns bool, never raises),
+    # so nothing that calls send_email needs to know which transport ran.
+    # A local mail catcher is the reason this exists: pointing SMTP_HOST at
+    # one exercises the signup mail path end to end — including the token
+    # round-trip — without a SendGrid account or a verified sender.
+    #
+    #   SMTP_HOST     — the switch. Blank = SendGrid API (production).
+    #   SMTP_PORT     — mailpit listens on 1025; relays conventionally 587.
+    #   SMTP_USERNAME — blank = no AUTH (mailpit, and most local relays).
+    #   SMTP_PASSWORD — only read when SMTP_USERNAME is set.
+    #   SMTP_STARTTLS — True upgrades the connection before AUTH; False is
+    #     correct for a plain local relay on 1025.
+    smtp_host: str = ""          # non-empty selects SMTP over the SendGrid API
+    smtp_port: int = 1025
+    smtp_username: str = ""      # blank = no AUTH (mailpit, and most local relays)
+    smtp_password: str = ""
+    smtp_starttls: bool = False
+
     # ── Admin dashboard ──────────────────────────────────────────────
     # Comma-separated list of emails granted the admin role. The admin
     # role gates the /admin/* management API + dashboard (user management,
@@ -434,10 +455,12 @@ class Settings(BaseSettings):
     def has_email_verification(self) -> bool:
         """Check if email verification is fully configured.
 
-        Needs BOTH the SendGrid key AND a sender-verified from-address
-        (SendGrid rejects mail from unverified senders with 403).
+        Needs a transport AND a from-address. Either transport will do:
+        the SendGrid key, or SMTP (selected whenever SMTP_HOST is set).
+        EMAIL_FROM_ADDRESS is required by both — SendGrid rejects mail from
+        unverified senders with 403, and SMTP needs a From header.
         """
-        return bool(self.sendgrid_api_key and self.email_from_address)
+        return bool((self.sendgrid_api_key or self.smtp_host) and self.email_from_address)
 
     @property
     def alerts_enabled(self) -> bool:
