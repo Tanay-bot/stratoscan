@@ -972,14 +972,20 @@ class PostgresDB:
             conn.commit()
 
     def mark_email_verified(self, user_id: int) -> None:
-        """Flip a user's email_verified flag to True (verification link used)."""
+        """Flip a user's email_verified flag to True (verification link used).
+
+        The token is deliberately LEFT on the row. It can only ever mark its
+        own account verified, so a replay is harmless — and keeping it is what
+        lets a second click be recognised and answered with success instead of
+        "invalid link". That matters more than it sounds: corporate mail
+        scanners pre-fetch links, so without this the user's first real click
+        lands on an error page. Resend overwrites the token; a password reset
+        clears it.
+        """
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE users SET email_verified = TRUE, "
-                    "verification_token = NULL, "
-                    "verification_token_expires = NULL "
-                    "WHERE id = %s",
+                    "UPDATE users SET email_verified = TRUE WHERE id = %s",
                     (user_id,),
                 )
             conn.commit()
@@ -997,7 +1003,7 @@ class PostgresDB:
             Dict with id, email, verification_token_expires — or None.
         """
         sql = """
-            SELECT id, email, verification_token_expires
+            SELECT id, email, email_verified, verification_token_expires
             FROM users WHERE verification_token = %s
         """
         with self._get_conn() as conn:

@@ -145,9 +145,8 @@ class FakeUserDB:
     def mark_email_verified(self, user_id: int) -> None:
         for user in self._users.values():
             if user["id"] == user_id:
+                # Token kept, like PostgresDB: a second click is recognised.
                 user["email_verified"] = True
-                user["verification_token"] = None
-                user["verification_token_expires"] = None
                 return
 
     def get_user_by_verification_token(self, token: str) -> Dict[str, Any] | None:
@@ -156,6 +155,7 @@ class FakeUserDB:
                 return {
                     "id": user["id"],
                     "email": user["email"],
+                    "email_verified": user.get("email_verified", False),
                     "verification_token_expires": user.get("verification_token_expires"),
                 }
         return None

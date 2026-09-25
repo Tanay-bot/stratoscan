@@ -323,12 +323,13 @@ print("✅ change-password without a token → 401")
 # ═══════════════════════════════════════════════════════════════════════════
 # 11. Routing: reset has its own rate-limit scope feeding the email budget
 # ═══════════════════════════════════════════════════════════════════════════
-assert api_module._scope_for_path("/auth/password-reset/request") == "reset"
-assert api_module._scope_for_path("/auth/password-reset/confirm") == "reset"
+assert api_module._scope_for_path("/auth/password-reset/request") == "auth_mail"
+assert api_module._scope_for_path("/auth/password-reset/confirm") == "auth_mail"
+assert api_module._scope_for_path("/auth/resend-verification") == "auth_mail"
 assert api_module._scope_for_path("/auth/change-password") == "auth"
-assert api_module.SCOPE_GLOBAL["reset"] == "auth_register"
-assert api_module.RATE_LIMITS["reset"] == api_module.RATE_LIMITS["register"]
-print("✅ reset → its own 'reset' scope, drawing on the planet-wide auth_register email budget")
+assert api_module.SCOPE_GLOBAL["auth_mail"] == "auth_register"
+assert api_module.RATE_LIMITS["auth_mail"] == api_module.RATE_LIMITS["register"]
+print("✅ reset + resend → 'auth_mail' scope, drawing on the planet-wide auth_register email budget")
 
 mock.patch.stopall()
 print("\nALL PASSWORD-RESET CHECKS PASSED")

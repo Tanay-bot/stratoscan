@@ -339,16 +339,16 @@ ratelimit-reset: 1785946800
 Budgets (per scope, from `/meta`): `screen 5/min · 50/day`,
 `interpret 10/min · 100/day`, `enrich 3/min · 20/day`,
 `backtest 2/min · 10/day`, `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
-`auth 10/min · 50/day`, `register 3/min · 10/day`, `reset 3/min · 10/day`
-(`/auth/password-reset/*`). Global shared buckets additionally cap usage
+`auth 10/min · 50/day`, `register 3/min · 10/day`, `auth_mail 3/min · 10/day`
+(`/auth/password-reset/*`, `/auth/resend-verification`). Global shared buckets additionally cap usage
 across all users (`screener_llm` 900/day, `backtest_llm` 200/day, and
-`auth_register` 50/day, which `register` and `reset` share because both
+`auth_register` 50/day, which `register` and `auth_mail` share because both
 send email). `OPTIONS` preflights are never counted.
 
 The per-IP default (the `read` bucket — every endpoint not explicitly
 scoped above) is env-configurable in production: `RATE_LIMIT_PER_MINUTE`
 (default `60`) and `RATE_LIMIT_PER_DAY` (default `1000`; weekly = 5× daily).
-The LLM/Finnhub/email-costly scopes (screen, enrich, backtest, refresh, register, reset)
+The LLM/Finnhub/email-costly scopes (screen, enrich, backtest, refresh, register, auth_mail)
 are cost shields and keep their own tighter caps — the two env vars only
 move the per-IP default, never the per-scope shields.
 

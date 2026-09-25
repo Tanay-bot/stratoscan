@@ -134,11 +134,13 @@ RATE_LIMITS = {
     # let a handful of IPs burn the SendGrid free tier (100 emails/day) and
     # enumerate accounts at scale. These caps are strictly tighter than auth.
     "register":  {"burst": 3,   "daily": 10,    "weekly": 30},
-    # Password reset sends an email per request, so it spends the same
-    # SendGrid free-tier budget registration does and gets the same caps.
-    # Its own scope (not "register") so a user resetting a password can't
-    # exhaust their own signup allowance, and vice versa.
-    "reset":     {"burst": 3,   "daily": 10,    "weekly": 30},
+    # Every OTHER auth action that sends an email — password reset and
+    # resend-verification — spends the same SendGrid free-tier budget that
+    # registration does, so it gets the same caps. Its own scope (not
+    # "register") so resending a link can't exhaust a signup allowance, and
+    # vice versa. Resend used to sit in the generic auth bucket: 50 emails a
+    # day per IP, outside the planet-wide budget below.
+    "auth_mail": {"burst": 3,   "daily": 10,    "weekly": 30},
 }
 
 # Global aggregates (ALL users share one bucket, enforced in the same batch
@@ -171,7 +173,7 @@ SCOPE_GLOBAL = {
     # (it exists to keep the whole planet under SendGrid's 100/day). A reset
     # email costs exactly what a verification email does, so it draws from
     # the same bucket rather than getting a second, additive allowance.
-    "reset": "auth_register",
+    "auth_mail": "auth_register",
 }
 
 _BURST_SECONDS = 60
@@ -190,8 +192,10 @@ def _scope_for_path(path: str) -> str:
         # VULN-002/003 fix: /auth/register must be matched BEFORE the generic
         # /auth prefix so it lands in its dedicated (tighter) bucket.
         ("/auth/register", "register"),
-        # Matched before the generic /auth prefix for the same reason.
-        ("/auth/password-reset", "reset"),
+        # Email-sending auth actions, matched before the generic /auth prefix
+        # for the same reason.
+        ("/auth/password-reset", "auth_mail"),
+        ("/auth/resend-verification", "auth_mail"),
         ("/auth", "auth"),
     ):
         if path.startswith(prefix):
@@ -1997,6 +2001,18 @@ async def verify_email(
             detail="Invalid or already-used verification link. Request a new one.",
         )
 
+    # Idempotent: a link for an account that is already verified succeeds,
+    # whatever its age. Checked BEFORE expiry, so neither a double click nor a
+    # mail scanner's pre-fetch of the link turns the user's real click into an
+    # error page.
+    if row.get("email_verified"):
+        return {
+            "error": False,
+            "verified": True,
+            "email": row["email"],
+            "message": "Your email is already verified. You can log in.",
+        }
+
     expires = row.get("verification_token_expires")
     # Fail-closed: a token with no readable expiry is rejected. The expiry
     # is defense-in-depth against a leaked link living forever — when it
@@ -2190,7 +2206,7 @@ async def logout_all(
 RESET_RESPONSE_FLOOR_SECONDS = 0.35
 
 # One reset email per account per window, whoever asks and from however many
-# IPs. The per-IP "reset" scope stops one client hammering; this stops a
+# IPs. The per-IP "auth_mail" scope stops one client hammering; this stops a
 # botnet mail-bombing one victim. Suppressed requests get the identical
 # response.
 RESET_PER_ACCOUNT_COOLDOWN_SECONDS = 60

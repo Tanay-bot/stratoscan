@@ -772,13 +772,13 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
    | `enrich` | 3 | 20 | 100 | `/enrich` |
    | `backtest` | 2 | 10 | 50 | `/backtest*` |
    | `refresh` | 1 | 10 | 50 | `/refresh` |
-   | `auth` | 10 | 50 | 350 | `/auth/*` except register |
+   | `auth` | 10 | 50 | 350 | `/auth/*` except register and the email-sending routes |
    | `register` | 3 | 10 | 30 | `/auth/register` (SendGrid cost shield) |
-   | `reset` | 3 | 10 | 30 | `/auth/password-reset/*` (sends email; shares `auth_register` global) |
+   | `auth_mail` | 3 | 10 | 30 | `/auth/password-reset/*`, `/auth/resend-verification` (send email; share `auth_register` global) |
 
 2. **Global buckets** (all users share; fixed 24h): `screener_llm` 900/day (screen+interpret+
    enrich), `backtest_llm` 200/day, `refresh_ops` 3/day (each refresh fires thousands of
-   Finnhub calls), `auth_register` 50/day (planet-wide cap on email-sending auth actions — register + reset — protecting SendGrid).
+   Finnhub calls), `auth_register` 50/day (planet-wide cap on email-sending auth actions — register, reset, resend — protecting SendGrid).
 
 **Behavior:**
 - `RATE_LIMIT_ENABLED` master switch; `RATE_LIMIT_BYPASS_IPS` comma-separated whitelist.

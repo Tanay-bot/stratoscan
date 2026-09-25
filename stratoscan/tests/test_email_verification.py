@@ -169,9 +169,13 @@ assert row and row["id"] == uid and row["email"] == "bob@example.com", row
 assert fake_db.get_user_by_verification_token("nope") is None
 fake_db.mark_email_verified(uid)
 bob = fake_db.get_user_by_id(uid)
-assert bob["email_verified"] is True and bob["verification_token"] is None
-assert fake_db.get_user_by_verification_token("tokbob") is None, "token must be consumed"
-print("✅ store/lookup/verify/consume lifecycle correct")
+assert bob["email_verified"] is True
+# The token is KEPT (it can only mark its own account verified) so that a
+# second click — or a mail scanner's pre-fetch — is recognised as "already
+# verified" instead of "invalid link". Appendix A: clicked twice → idempotent.
+again = fake_db.get_user_by_verification_token("tokbob")
+assert again and again["email_verified"] is True, again
+print("✅ store/lookup/verify lifecycle correct; token kept for idempotent re-clicks")
 
 
 # ── 5. API flow (real app, fakes for DB/LLM/email) ───────────────────────────
@@ -189,8 +193,7 @@ assert reg["email_sent"] is True, "verification email must be sent"
 assert reg["user"]["email_verified"] is False, "new users start unverified"
 carol = fake_db.get_user_by_email("carol@stratoscan.app")
 assert carol["verification_token"], "token must be stored on the user row"
-# Capture BEFORE verification: mark_email_verified nulls the token in the
-# shared dict, so the replay assertion below needs the original value.
+# Capture the token for the re-click assertions below.
 carol_token = carol["verification_token"]
 print("✅ register → email sent, user unverified, token stored")
 
@@ -201,10 +204,17 @@ assert r.json()["verified"] is True
 assert fake_db.get_user_by_email("carol@stratoscan.app")["email_verified"] is True
 print("✅ GET /auth/verify-email flips the flag")
 
-# 5c. Token is consumed — a replay gets 400.
+# 5c. Clicked twice → idempotent success, not an error page (Appendix A).
 r = client.get(f"/auth/verify-email?token={carol_token}")
-assert r.status_code == 400, f"replay must fail: {r.status_code}"
-print("✅ replayed token → 400 (consumed)")
+assert r.status_code == 200 and r.json()["verified"] is True, f"second click must succeed: {r.status_code} {r.text}"
+# ...even once the link itself has expired: the account IS verified.
+fake_db._users["carol@stratoscan.app"]["verification_token_expires"] = "2000-01-01T00:00:00+00:00"
+r = client.get(f"/auth/verify-email?token={carol_token}")
+assert r.status_code == 200 and r.json()["verified"] is True, r.text
+# The discriminating half: a token that was never issued still fails.
+r = client.get("/auth/verify-email?token=never-issued-token-xyz")
+assert r.status_code == 400, r.status_code
+print("✅ second click (even after expiry) → 200 verified; a never-issued token → 400")
 
 # 5d. POST form + unknown token.
 uid2 = fake_db.create_user(
