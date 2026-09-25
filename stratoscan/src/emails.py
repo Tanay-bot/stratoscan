@@ -46,9 +46,9 @@ logger = logging.getLogger(__name__)
 # SendGrid Web API v3 — transactional mail endpoint.
 SENDGRID_MAIL_URL = "https://api.sendgrid.com/v3/mail/send"
 
-# Request timeout: SendGrid accepts a message in well under a second; a
+# Timeout for both transports: mail is accepted in well under a second; a
 # generous cap keeps a slow network from hanging a register request.
-SENDGRID_TIMEOUT: float = 10.0
+MAIL_TIMEOUT: float = 10.0
 
 
 def generate_verification_token() -> str:
@@ -139,7 +139,7 @@ def send_email(
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=SENDGRID_TIMEOUT) as resp:
+        with urllib.request.urlopen(request, timeout=MAIL_TIMEOUT) as resp:
             # SendGrid returns 202 Accepted on success (mail is queued).
             if resp.status != 202:
                 logger.warning(
@@ -234,19 +234,24 @@ def _send_via_smtp(
         same contract as the SendGrid path, because ``/auth/register``
         treats a failed send as non-fatal and reports ``email_sent``.
     """
-    message = EmailMessage()
-    message["To"] = to_email
-    message["From"] = settings.email_from_address
-    message["Subject"] = subject
-    message.set_content(text_body)
-    if html_body:
-        message.add_alternative(html_body, subtype="html")
-
     try:
+        # Construction stays INSIDE the try on purpose: email.message raises
+        # at header ASSIGNMENT for a linefeed in the recipient (its
+        # injection defence), which is before any socket exists. Hoist it
+        # back out and a malformed address escapes as a 500 from
+        # /auth/register — after the user row is already committed.
+        message = EmailMessage()
+        message["To"] = to_email
+        message["From"] = settings.email_from_address
+        message["Subject"] = subject
+        message.set_content(text_body)
+        if html_body:
+            message.add_alternative(html_body, subtype="html")
+
         with smtplib.SMTP(
             settings.smtp_host,
             settings.smtp_port,
-            timeout=SENDGRID_TIMEOUT,  # shared outbound-mail timeout
+            timeout=MAIL_TIMEOUT,
         ) as smtp:
             if settings.smtp_starttls:
                 smtp.starttls()

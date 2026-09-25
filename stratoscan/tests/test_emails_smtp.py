@@ -35,7 +35,7 @@ os.environ["SENDGRID_API_KEY"] = "SG.testkey123"
 os.environ["EMAIL_FROM_ADDRESS"] = "noreply@stratoscan.app"
 
 from src.config import settings  # noqa: E402
-from src.emails import SENDGRID_MAIL_URL, SENDGRID_TIMEOUT, send_email  # noqa: E402
+from src.emails import MAIL_TIMEOUT, SENDGRID_MAIL_URL, send_email  # noqa: E402
 
 SENDGRID_KEY = "SG.testkey123"
 
@@ -99,7 +99,7 @@ print("1. SMTP_HOST set → the SMTP branch wins...")
 with _smtp() as (smtp_mock, urlopen_mock):
     ok = send_email("user@example.com", "Subject line", "plain body")
 assert ok is True, "SMTP send must report success"
-smtp_mock.assert_called_once_with("mailpit", 1025, timeout=SENDGRID_TIMEOUT)
+smtp_mock.assert_called_once_with("mailpit", 1025, timeout=MAIL_TIMEOUT)
 smtp_mock.return_value.__enter__().send_message.assert_called_once()
 urlopen_mock.assert_not_called()
 print("✅ SMTP_HOST set → smtplib.SMTP('mailpit', 1025), one send_message, zero SendGrid calls")
@@ -215,6 +215,55 @@ with _smtp(smtp_starttls=True) as (smtp_mock, _):
     smtp_mock.return_value.__enter__().starttls.side_effect = OSError("no STARTTLS offered")
     assert send_email("user@example.com", "s", "b") is False
 print("✅ STARTTLS refused → False")
+
+# A malformed recipient must degrade, not raise. `email.message` raises at
+# header ASSIGNMENT (its linefeed/injection defence), which is before any
+# socket exists — so this only returns False because construction happens
+# inside the try. /auth/register does not wrap this call and the user row is
+# already committed, so an escaping exception is a 500 on a created account.
+with _smtp() as (smtp_mock, _):
+    assert send_email("a@b.test\nBcc: x@y.test", "s", "b") is False
+    smtp_mock.assert_not_called()  # never got as far as a connection
+print("✅ header-injection attempt → False, no connection, no exception")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. mail_transport — the single owner both gates read
+# ═══════════════════════════════════════════════════════════════════════════
+print("7. mail_transport names the selected transport...")
+with mock.patch.multiple(
+    settings, smtp_host="mailpit", sendgrid_api_key="SG.key", email_from_address="a@b.test"
+):
+    assert settings.mail_transport == "smtp", settings.mail_transport
+    # SMTP_HOST wins over a configured key: it is what src/emails.py dispatches on.
+print("✅ SMTP_HOST set (key also present) → 'smtp' — agrees with the dispatch")
+
+with mock.patch.multiple(
+    settings, smtp_host="", sendgrid_api_key="SG.key", email_from_address="a@b.test"
+):
+    assert settings.mail_transport == "sendgrid", settings.mail_transport
+print("✅ SMTP_HOST empty + key set → 'sendgrid'")
+
+with mock.patch.multiple(
+    settings, smtp_host="", sendgrid_api_key="", alert_email="ops@x.test"
+):
+    assert settings.mail_transport == "", settings.mail_transport
+    assert settings.has_email_verification is False
+    assert settings.alerts_enabled is False
+print("✅ neither transport → '' → verification and alerts both off")
+
+# The alerts bug this pins: alerts_enabled used to require SENDGRID_API_KEY,
+# so an SMTP-only deployment delivered verification mail and paged nobody.
+with mock.patch.multiple(
+    settings,
+    smtp_host="mailpit",
+    sendgrid_api_key="",
+    email_from_address="noreply@stratoscan.test",
+    alert_email="ops@x.test",
+    alert_webhook_url="",
+):
+    assert settings.alerts_enabled is True
+print("✅ SMTP-only + ALERT_EMAIL (no SendGrid key) → alerts_enabled True")
 
 print()
 print("🎯 All SMTP transport tests pass!")

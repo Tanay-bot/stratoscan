@@ -452,27 +452,40 @@ class Settings(BaseSettings):
         return bool(self.jwt_secret)
 
     @property
+    def mail_transport(self) -> str:
+        """Which transport send_email will use: "smtp", "sendgrid", or "" (none).
+
+        SMTP_HOST wins — src/emails.py dispatches on it directly, and this
+        property must agree with that dispatch or the two will drift.
+        """
+        if self.smtp_host:
+            return "smtp"
+        if self.sendgrid_api_key:
+            return "sendgrid"
+        return ""
+
+    @property
     def has_email_verification(self) -> bool:
         """Check if email verification is fully configured.
 
-        Needs a transport AND a from-address. Either transport will do:
-        the SendGrid key, or SMTP (selected whenever SMTP_HOST is set).
-        EMAIL_FROM_ADDRESS is required by both — SendGrid rejects mail from
-        unverified senders with 403, and SMTP needs a From header.
+        Needs a transport AND a from-address. EMAIL_FROM_ADDRESS is required
+        by both — SendGrid rejects mail from unverified senders with 403,
+        and SMTP needs a From header.
         """
-        return bool((self.sendgrid_api_key or self.smtp_host) and self.email_from_address)
+        return bool(self.mail_transport and self.email_from_address)
 
     @property
     def alerts_enabled(self) -> bool:
         """True when at least one alert delivery channel is configured.
 
-        A webhook URL is enough on its own. Email needs the recipient AND
-        the SendGrid sender (SendGrid rejects mail from unverified senders
-        with 403, exactly like email verification).
+        A webhook URL is enough on its own. Email needs the recipient, a
+        configured transport (see mail_transport) and a from-address.
         """
         if self.alert_webhook_url:
             return True
-        return bool(self.alert_email and self.sendgrid_api_key and self.email_from_address)
+        return bool(
+            self.alert_email and self.mail_transport and self.email_from_address
+        )
 
     @property
     def cors_origins(self) -> List[str]:
