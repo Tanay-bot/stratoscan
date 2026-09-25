@@ -259,7 +259,9 @@ def _send_via_smtp(
                 smtp.login(settings.smtp_username, settings.smtp_password)
             smtp.send_message(message)
     except Exception as e:
-        logger.warning("SMTP send failed for %s: %s", to_email, e)
+        # %r, not %s: to_email is attacker-controlled, and under LOG_FORMAT=text
+        # its newlines would forge log lines.
+        logger.warning("SMTP send failed for %r: %s", to_email, e)
         return False
     logger.info("Email sent via SMTP to %s", to_email)
     return True
