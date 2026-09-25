@@ -67,6 +67,9 @@ assert RATE_LIMITS == {
     # mass signup can't burn the SendGrid free tier (100/day) or enumerate
     # accounts at scale. Strictly tighter than the auth bucket.
     "register":  {"burst": 3,   "daily": 10,    "weekly": 30},
+    # Day 3: password reset sends an email per request, so it gets the same
+    # caps as register in its own scope (so the two can't starve each other).
+    "reset":     {"burst": 3,   "daily": 10,    "weekly": 30},
 }, f"RATE_LIMITS drifted: {RATE_LIMITS}"
 assert GLOBAL_LIMITS == {
     "screener_llm": 900,
@@ -85,6 +88,8 @@ assert SCOPE_GLOBAL == {
     "backtest": "backtest_llm",
     "refresh": "refresh_ops",
     "register": "auth_register",
+    # ...and draws on the same planet-wide email budget, not a second one.
+    "reset": "auth_register",
 }, f"SCOPE_GLOBAL drifted: {SCOPE_GLOBAL}"
 print("✅ Approved limit numbers locked in test")
 
@@ -96,6 +101,9 @@ scope_checks = {
     "/backtest": "backtest",
     "/refresh": "refresh",
     "/auth/register": "register",
+    "/auth/password-reset/request": "reset",
+    "/auth/password-reset/confirm": "reset",
+    "/auth/change-password": "auth",
     "/auth/login": "auth",
     "/auth/me": "auth",
     "/stocks": "read",

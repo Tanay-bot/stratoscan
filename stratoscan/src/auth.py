@@ -127,6 +127,22 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
+def generate_reset_token() -> str:
+    """Return a one-time password-reset token (256 bits, URL-safe)."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_reset_token(token: str) -> str:
+    """SHA-256 hex of a reset token — the only form ever stored.
+
+    A fast hash is correct here, unlike for passwords: the token is 256
+    random bits, so there is nothing to brute-force, and PBKDF2's cost would
+    only slow down the link click. What matters is that the database holds
+    something that cannot be replayed as a link.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def create_access_token(user_id: int, email: str, token_version: int = 0) -> str:
     """Create a signed JWT (HS256) for a user.
 

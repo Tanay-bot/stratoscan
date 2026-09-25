@@ -209,6 +209,77 @@ def send_verification_email(
     return send_email(to_email, subject, text, html_body=html)
 
 
+def build_password_reset_url(token: str) -> str:
+    """Build the emailed password-reset link (frontend origin + token).
+
+    The frontend's ``/reset-password`` route renders the new-password form
+    and POSTs the token to ``/auth/password-reset/confirm``.
+    """
+    base = settings.app_base_url.rstrip("/")
+    return f"{base}/reset-password?token={token}"
+
+
+def send_password_reset_email(to_email: str, token: str) -> bool:
+    """Email a single-use password-reset link.
+
+    Only ever called for an address that has an account; the API returns the
+    same response either way, so this email's existence is the only signal,
+    and it goes to the address's owner.
+
+    Returns:
+        True if the transport accepted the mail, False otherwise.
+    """
+    url = build_password_reset_url(token)
+    minutes = settings.password_reset_token_ttl_minutes
+    subject = "Reset your Stratoscan password"
+    text = (
+        "Someone asked to reset the password for this Stratoscan account.\n\n"
+        "To choose a new password, open this link:\n"
+        f"{url}\n\n"
+        f"This link expires in {minutes} minutes and works once. Requesting "
+        "another link cancels this one.\n\n"
+        "If this wasn't you, ignore this email — your password has not changed.\n"
+    )
+    html = (
+        "<p>Someone asked to reset the password for this Stratoscan account.</p>"
+        f'<p><a href="{url}" style="background:#4f46e5;color:#fff;'
+        'padding:10px 18px;border-radius:6px;text-decoration:none;">'
+        "Choose a new password</a></p>"
+        f"<p>Or open this link: <a href=\"{url}\">{url}</a></p>"
+        f"<p>This link expires in {minutes} minutes and works once. Requesting "
+        "another link cancels this one.</p>"
+        "<p>If this wasn't you, ignore this email — your password has not changed.</p>"
+    )
+    return send_email(to_email, subject, text, html_body=html)
+
+
+def send_password_changed_email(to_email: str) -> bool:
+    """Tell the account owner their password changed and sessions were ended.
+
+    Sent after a reset or an in-app change. It is the owner's only warning
+    if someone else did it, so it says what happened and what to do.
+
+    Returns:
+        True if the transport accepted the mail, False otherwise.
+    """
+    base = settings.app_base_url.rstrip("/")
+    subject = "Your Stratoscan password was changed"
+    text = (
+        "The password for this Stratoscan account was just changed, and every "
+        "device that was signed in has been signed out.\n\n"
+        "If this was you, there is nothing to do.\n\n"
+        "If it wasn't, reset your password now:\n"
+        f"{base}/forgot-password\n"
+    )
+    html = (
+        "<p>The password for this Stratoscan account was just changed, and "
+        "every device that was signed in has been signed out.</p>"
+        "<p>If this was you, there is nothing to do.</p>"
+        f'<p>If it wasn\'t, <a href="{base}/forgot-password">reset your password now</a>.</p>'
+    )
+    return send_email(to_email, subject, text, html_body=html)
+
+
 def _send_via_smtp(
     to_email: str,
     subject: str,

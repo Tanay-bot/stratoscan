@@ -467,6 +467,138 @@
         }
       }
     },
+    "/auth/password-reset/request": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Email a password-reset link (same response whether or not the account exists)",
+        "description": "Start a password reset.\n\nAlways returns the same 200 body after the same minimum time, whether\nthe address has an account, has no account, is throttled, or the mail\ntransport is down. The only observable difference is the email, which\nreaches only the address's owner.",
+        "operationId": "request_password_reset_auth_password_reset_request_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Request Password Reset Auth Password Reset Request Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/password-reset/confirm": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Set a new password from an emailed reset link",
+        "description": "Finish a password reset.\n\nOn success the password changes, the link stops working, the email is\nmarked verified (the link proved control of it), and **every session the\naccount holds is revoked** via ``token_version`` \u2014 including any session\nan attacker had. The owner is emailed that it happened.",
+        "operationId": "confirm_password_reset_auth_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Confirm Password Reset Auth Password Reset Confirm Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/change-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Change the password while signed in (signs out every other device)",
+        "description": "Change the password and revoke every other session.\n\nReturns a fresh token carrying the new ``token_version`` so the device\nthat made the change stays signed in while every other one is signed out.\n\nA wrong current password is a **400**, not a 401: the frontend treats any\n401 outside its auth allowlist as \"your session died\" and logs out, so a\ntypo here would otherwise sign the user out of the page they are on.",
+        "operationId": "change_password_auth_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Change Password Auth Change Password Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/screen": {
       "post": {
         "tags": [
@@ -2051,6 +2183,30 @@
         "title": "BacktestResultItem",
         "description": "Backtest results for a single symbol."
       },
+      "ChangePasswordRequest": {
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Current Password"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "New Password",
+            "description": "The new password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest",
+        "description": "Request body for changing the password while signed in."
+      },
       "ConfigStatus": {
         "properties": {
           "finnhub_key_count": {
@@ -2601,6 +2757,48 @@
         ],
         "title": "PaginationMeta",
         "description": "Pagination contract shared by every list endpoint."
+      },
+      "PasswordResetConfirm": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 10,
+            "title": "Token",
+            "description": "Token from the emailed link"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "New Password",
+            "description": "The new password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "PasswordResetConfirm",
+        "description": "Request body for setting a new password from an emailed reset link."
+      },
+      "PasswordResetRequest": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email",
+            "description": "Account email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequest",
+        "description": "Request body for asking for a password-reset email."
       },
       "PersonalDataPayload": {
         "properties": {

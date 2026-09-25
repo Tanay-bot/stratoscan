@@ -459,6 +459,8 @@ CREATE TABLE IF NOT EXISTS users (
     verification_token_expires TIMESTAMPTZ,
     is_admin            BOOLEAN NOT NULL DEFAULT FALSE,
     token_version       INTEGER NOT NULL DEFAULT 0,
+    reset_token_hash    TEXT,
+    reset_token_expires TIMESTAMPTZ,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 """
@@ -490,6 +492,17 @@ USERS_EMAIL_VERIFICATION_BACKFILL = [
 # ones, this covers a bare deploy — see CLAUDE.md §18).
 USERS_TOKEN_VERSION_BACKFILL = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+]
+
+# Password reset (POST /auth/password-reset/*). Only the SHA-256 of the
+# emailed token is stored, never the token itself, so a read of this table
+# (a leaked backup, a SQL-injection elsewhere) yields nothing usable. One
+# hash per user: requesting a second reset overwrites the first, which is
+# what makes "only the most recent link works" true without any bookkeeping.
+USERS_PASSWORD_RESET_BACKFILL = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS idx_users_reset_token_hash ON users (reset_token_hash)",
 ]
 
 # ── PostgreSQL (main DB): job_runs table ─────────────────────────────
@@ -663,7 +676,9 @@ class PostgresDB:
                 # statement independently guarded so one failure can't
                 # abort the rest; no-ops on fresh installs.
                 for stmt in (
-                    USERS_EMAIL_VERIFICATION_BACKFILL + USERS_TOKEN_VERSION_BACKFILL
+                    USERS_EMAIL_VERIFICATION_BACKFILL
+                    + USERS_TOKEN_VERSION_BACKFILL
+                    + USERS_PASSWORD_RESET_BACKFILL
                 ):
                     try:
                         cur.execute(stmt)
@@ -757,7 +772,7 @@ class PostgresDB:
         """
         sql = """
             SELECT id, email, password_hash, plan, email_verified, is_admin,
-                   token_version, created_at
+                   token_version, reset_token_expires, created_at
             FROM users WHERE email = %s
         """
         with self._get_conn() as conn:
@@ -990,6 +1005,114 @@ class PostgresDB:
                 cur.execute(sql, (token,))
                 row = cur.fetchone()
         return dict(row) if row else None
+
+    # ── Password reset & change ─────────────────────────────────────
+
+    def set_password_reset_token(
+        self, user_id: int, token_hash: str, expires_at: str
+    ) -> None:
+        """Store the hash of a freshly issued reset token, replacing any older one.
+
+        Overwriting is the point: a second request invalidates the first
+        link, so only the most recently emailed link can ever work.
+
+        Args:
+            user_id: The user's database id.
+            token_hash: SHA-256 hex of the emailed token (never the token).
+            expires_at: ISO timestamp after which the token is invalid.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET reset_token_hash = %s, "
+                    "reset_token_expires = %s WHERE id = %s",
+                    (token_hash, expires_at, user_id),
+                )
+            conn.commit()
+
+    def get_user_by_reset_token_hash(
+        self, token_hash: str
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch the user holding a reset-token hash, or None.
+
+        Args:
+            token_hash: SHA-256 hex of the token from the emailed link.
+
+        Returns:
+            Dict with id, email, reset_token_expires — or None.
+        """
+        sql = """
+            SELECT id, email, reset_token_expires
+            FROM users WHERE reset_token_hash = %s
+        """
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (token_hash,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def complete_password_reset(
+        self, user_id: int, token_hash: str, password_hash: str
+    ) -> Optional[int]:
+        """Consume a reset token: set the password and revoke every session.
+
+        Single-use is enforced by the ``WHERE reset_token_hash = %s`` clause
+        in the same statement that clears it — not by a prior read. Two
+        concurrent requests carrying the same token cannot both succeed: the
+        second finds the hash already NULL, matches no row, and gets None.
+
+        Also marks the email verified: following a link delivered to the
+        address proves control of it, exactly as the verification link does.
+
+        Args:
+            user_id: The user's database id.
+            token_hash: SHA-256 hex of the presented token.
+            password_hash: The new PBKDF2 hash.
+
+        Returns:
+            The new token_version, or None when the token was already used.
+        """
+        sql = (
+            "UPDATE users SET password_hash = %s, "
+            "reset_token_hash = NULL, reset_token_expires = NULL, "
+            "email_verified = TRUE, "
+            "verification_token = NULL, verification_token_expires = NULL, "
+            "token_version = token_version + 1 "
+            "WHERE id = %s AND reset_token_hash = %s "
+            "RETURNING token_version"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (password_hash, user_id, token_hash))
+                row = cur.fetchone()
+            conn.commit()
+        return int(row[0]) if row else None
+
+    def change_password(self, user_id: int, password_hash: str) -> int:
+        """Set a new password and revoke every existing session.
+
+        Also clears any outstanding reset token: a link emailed before the
+        change must not be able to undo it.
+
+        Args:
+            user_id: The user's database id.
+            password_hash: The new PBKDF2 hash.
+
+        Returns:
+            The new token_version (the caller re-issues a token with it).
+        """
+        sql = (
+            "UPDATE users SET password_hash = %s, "
+            "reset_token_hash = NULL, reset_token_expires = NULL, "
+            "token_version = token_version + 1 "
+            "WHERE id = %s RETURNING token_version"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (password_hash, user_id))
+                row = cur.fetchone()
+            conn.commit()
+        return int(row[0]) if row else 0
 
     # ── Per-user saved data (watchlist / screeners / backtests) ────────
 

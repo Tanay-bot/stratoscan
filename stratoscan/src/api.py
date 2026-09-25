@@ -134,6 +134,11 @@ RATE_LIMITS = {
     # let a handful of IPs burn the SendGrid free tier (100 emails/day) and
     # enumerate accounts at scale. These caps are strictly tighter than auth.
     "register":  {"burst": 3,   "daily": 10,    "weekly": 30},
+    # Password reset sends an email per request, so it spends the same
+    # SendGrid free-tier budget registration does and gets the same caps.
+    # Its own scope (not "register") so a user resetting a password can't
+    # exhaust their own signup allowance, and vice versa.
+    "reset":     {"burst": 3,   "daily": 10,    "weekly": 30},
 }
 
 # Global aggregates (ALL users share one bucket, enforced in the same batch
@@ -162,6 +167,11 @@ SCOPE_GLOBAL = {
     "backtest": "backtest_llm",
     "refresh": "refresh_ops",
     "register": "auth_register",
+    # auth_register is the planet-wide cap on email-sending auth actions
+    # (it exists to keep the whole planet under SendGrid's 100/day). A reset
+    # email costs exactly what a verification email does, so it draws from
+    # the same bucket rather than getting a second, additive allowance.
+    "reset": "auth_register",
 }
 
 _BURST_SECONDS = 60
@@ -180,6 +190,8 @@ def _scope_for_path(path: str) -> str:
         # VULN-002/003 fix: /auth/register must be matched BEFORE the generic
         # /auth prefix so it lands in its dedicated (tighter) bucket.
         ("/auth/register", "register"),
+        # Matched before the generic /auth prefix for the same reason.
+        ("/auth/password-reset", "reset"),
         ("/auth", "auth"),
     ):
         if path.startswith(prefix):
@@ -844,6 +856,36 @@ class AuthResponse(BaseModel):
     email_sent: bool = False
 
 
+class PasswordResetRequest(BaseModel):
+    """Request body for asking for a password-reset email."""
+
+    email: str = Field(..., min_length=3, max_length=254, description="Account email")
+
+
+class PasswordResetConfirm(BaseModel):
+    """Request body for setting a new password from an emailed reset link."""
+
+    token: str = Field(..., min_length=10, max_length=200, description="Token from the emailed link")
+    new_password: str = Field(
+        ...,
+        min_length=settings.password_min_length,
+        max_length=128,
+        description="The new password",
+    )
+
+
+class ChangePasswordRequest(BaseModel):
+    """Request body for changing the password while signed in."""
+
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(
+        ...,
+        min_length=settings.password_min_length,
+        max_length=128,
+        description="The new password",
+    )
+
+
 class VerifyEmailRequest(BaseModel):
     """Request body for the email verification endpoint.
 
@@ -1359,7 +1401,8 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
     if path.startswith("/backtest"):
         return "bearer"
     if path in (
-        "/auth/me", "/auth/resend-verification", "/auth/logout-all"
+        "/auth/me", "/auth/resend-verification", "/auth/logout-all",
+        "/auth/change-password",
     ) or path.startswith("/me/"):
         return "bearer"
     return "none"
@@ -2109,6 +2152,246 @@ async def logout_all(
         "error": False,
         "token_version": new_version,
         "message": "All sessions are logged out. Log in again for a new token.",
+    }
+
+
+# ── Password reset & change ─────────────────────────────────────────────
+# Reset must not reveal whether an address has an account — by content,
+# status code, OR timing. Content and status are easy (one response for
+# both). Timing is not: the real path does an UPDATE and the unknown path
+# does nothing. Two measures close it: the email is sent AFTER the response
+# (a BackgroundTask), so the slow part never sits on the request path; and
+# every response is padded to a fixed floor, so the one remaining UPDATE
+# (single-digit milliseconds) disappears under it. This is the same
+# property login gets from its dummy-hash comparison.
+RESET_RESPONSE_FLOOR_SECONDS = 0.35
+
+# One reset email per account per window, whoever asks and from however many
+# IPs. The per-IP "reset" scope stops one client hammering; this stops a
+# botnet mail-bombing one victim. Suppressed requests get the identical
+# response.
+RESET_PER_ACCOUNT_COOLDOWN_SECONDS = 60
+
+_RESET_REQUEST_MESSAGE = (
+    "If an account exists for that address, we've sent a link to reset its "
+    "password. It expires soon, so check your inbox now."
+)
+
+
+async def _pad_to_floor(started: float, floor: float) -> None:
+    """Sleep until ``floor`` seconds have passed since ``started``."""
+    remaining = floor - (time.monotonic() - started)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
+
+
+def _as_utc(value: Any) -> Optional[datetime]:
+    """Parse a TIMESTAMPTZ (datetime or ISO string) to aware UTC, or None."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, datetime):
+            dt = value
+        else:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+@app.post(
+    "/auth/password-reset/request",
+    response_model=Dict[str, Any],
+    summary="Email a password-reset link (same response whether or not the account exists)",
+    tags=["Auth"],
+)
+async def request_password_reset(
+    request: Request,
+    response: Response,
+    payload: PasswordResetRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Start a password reset.
+
+    Always returns the same 200 body after the same minimum time, whether
+    the address has an account, has no account, is throttled, or the mail
+    transport is down. The only observable difference is the email, which
+    reaches only the address's owner.
+    """
+    from src.auth import generate_reset_token, hash_reset_token
+    from src.database import PostgresDB
+    from src.emails import send_password_reset_email
+
+    started = time.monotonic()
+    email = payload.email.strip().lower()
+
+    try:
+        db = PostgresDB()
+        user = db.get_user_by_email(email)
+    except Exception as e:
+        logger.error("Password-reset lookup failed: %s", e)
+        user = None
+
+    if user is not None:
+        ttl = timedelta(minutes=settings.password_reset_token_ttl_minutes)
+        now = datetime.now(timezone.utc)
+        prior_expiry = _as_utc(user.get("reset_token_expires"))
+        issued_recently = (
+            prior_expiry is not None
+            and now - (prior_expiry - ttl)
+            < timedelta(seconds=RESET_PER_ACCOUNT_COOLDOWN_SECONDS)
+        )
+        if not settings.has_email_verification:
+            logger.warning(
+                "Password reset requested but no mail transport is configured"
+            )
+        elif issued_recently:
+            logger.info("Password reset for user %s suppressed (cooldown)", user["id"])
+        else:
+            token = generate_reset_token()
+            try:
+                db.set_password_reset_token(
+                    user["id"], hash_reset_token(token), (now + ttl).isoformat()
+                )
+                # After the response: the send is the slow part, and it must
+                # not be what distinguishes a real address from a fake one.
+                background_tasks.add_task(send_password_reset_email, email, token)
+                logger.info("Password reset issued for user %s", user["id"])
+            except Exception as e:
+                logger.error("Password-reset token store failed: %s", e)
+
+    await _pad_to_floor(started, RESET_RESPONSE_FLOOR_SECONDS)
+    return {"error": False, "message": _RESET_REQUEST_MESSAGE}
+
+
+@app.post(
+    "/auth/password-reset/confirm",
+    response_model=Dict[str, Any],
+    summary="Set a new password from an emailed reset link",
+    tags=["Auth"],
+)
+async def confirm_password_reset(
+    request: Request,
+    response: Response,
+    payload: PasswordResetConfirm,
+    background_tasks: BackgroundTasks,
+):
+    """Finish a password reset.
+
+    On success the password changes, the link stops working, the email is
+    marked verified (the link proved control of it), and **every session the
+    account holds is revoked** via ``token_version`` — including any session
+    an attacker had. The owner is emailed that it happened.
+    """
+    from src.auth import hash_password, hash_reset_token
+    from src.database import PostgresDB
+    from src.emails import send_password_changed_email
+
+    invalid = HTTPException(
+        status_code=400,
+        detail="This reset link is invalid or has already been used. Request a new one.",
+    )
+    token_hash = hash_reset_token(payload.token)
+    try:
+        db = PostgresDB()
+        row = db.get_user_by_reset_token_hash(token_hash)
+    except Exception as e:
+        logger.error("Password-reset lookup failed: %s", e)
+        raise HTTPException(
+            status_code=502, detail="Could not reset your password right now. Try again later."
+        )
+    if not row:
+        raise invalid
+
+    # Fail closed on a missing or unparseable expiry, as verify-email does.
+    expires = _as_utc(row.get("reset_token_expires"))
+    if expires is None:
+        raise invalid
+    if expires < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=400,
+            detail="This reset link has expired. Request a new one.",
+        )
+
+    try:
+        new_version = db.complete_password_reset(
+            row["id"], token_hash, hash_password(payload.new_password)
+        )
+    except Exception as e:
+        logger.error("Password reset failed for user %s: %s", row["id"], e)
+        raise HTTPException(
+            status_code=502, detail="Could not reset your password right now. Try again later."
+        )
+    if new_version is None:
+        # Another request consumed this token between our read and write.
+        raise invalid
+
+    background_tasks.add_task(send_password_changed_email, row["email"])
+    logger.info(
+        "Password reset completed for user %s (sessions revoked, token_version=%d)",
+        row["id"], new_version,
+    )
+    return {
+        "error": False,
+        "message": "Your password has been reset and every device has been signed out. Log in with your new password.",
+    }
+
+
+@app.post(
+    "/auth/change-password",
+    response_model=Dict[str, Any],
+    summary="Change the password while signed in (signs out every other device)",
+    tags=["Auth"],
+)
+async def change_password(
+    request: Request,
+    response: Response,
+    payload: ChangePasswordRequest,
+    background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Change the password and revoke every other session.
+
+    Returns a fresh token carrying the new ``token_version`` so the device
+    that made the change stays signed in while every other one is signed out.
+
+    A wrong current password is a **400**, not a 401: the frontend treats any
+    401 outside its auth allowlist as "your session died" and logs out, so a
+    typo here would otherwise sign the user out of the page they are on.
+    """
+    from src.auth import create_access_token, hash_password, verify_password
+    from src.database import PostgresDB
+    from src.emails import send_password_changed_email
+
+    if not verify_password(payload.current_password, user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Your current password is incorrect.")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(
+            status_code=400, detail="Choose a password different from your current one."
+        )
+
+    try:
+        new_version = PostgresDB().change_password(
+            int(user["id"]), hash_password(payload.new_password)
+        )
+    except Exception as e:
+        logger.error("Password change failed for user %s: %s", user["id"], e)
+        raise HTTPException(
+            status_code=502, detail="Could not change your password right now. Try again later."
+        )
+
+    if settings.has_email_verification:
+        background_tasks.add_task(send_password_changed_email, user["email"])
+    logger.info(
+        "Password changed for user %s (other sessions revoked, token_version=%d)",
+        user["id"], new_version,
+    )
+    return {
+        "error": False,
+        "access_token": create_access_token(int(user["id"]), user["email"], new_version),
+        "token_type": "bearer",
+        "expires_in": settings.jwt_expire_hours * 3600,
+        "message": "Password changed. Every other device has been signed out.",
     }
 
 

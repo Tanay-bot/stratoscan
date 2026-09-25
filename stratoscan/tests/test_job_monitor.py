@@ -504,7 +504,10 @@ for f in sorted(_VERSIONS.glob("*.py")):
 revs = [r for _, r, _ in migs]
 downs = [d for _, _, d in migs if d]
 heads = [r for r in revs if r not in downs]
-assert len(heads) == 1 and heads[0] == "c1d2e3f4a5b6", heads
+# Exactly one head, derived from the chain — deliberately NOT a literal id,
+# which had to be hand-edited by every migration since (test_migrations also
+# pins "one head" generically; this suite only needs the job-monitor link).
+assert len(heads) == 1, heads
 monitor_mig = next(m for m in migs if m[1] == "f7a8b9c0d1e2")
 assert monitor_mig[2] == "f1a2b3c4d5e6", monitor_mig  # chains after screener-quality
 body = (_VERSIONS / monitor_mig[0]).read_text(encoding="utf-8")
@@ -514,7 +517,7 @@ assert "DROP TABLE IF EXISTS job_runs" in body  # downgrade reverses
 # Runtime schemas must agree with the migration (single source of truth).
 from src.database import JOB_RUNS_SCHEMA, SCHEDULER_HEARTBEAT_SCHEMA  # noqa: E402
 assert "job_runs" in JOB_RUNS_SCHEMA and "scheduler_heartbeat" in SCHEDULER_HEARTBEAT_SCHEMA
-print("✅ Migration: linear head c1d2e3f4a5b6, job tables present, schema synced")
+print(f"✅ Migration: linear head {heads[0]}, job tables present, schema synced")
 
 print()
 print("🎯 All job-monitor tests pass!")

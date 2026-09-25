@@ -45,6 +45,8 @@ expected = {
     "/stocks", "/stocks/{symbol}", "/refresh", "/news", "/news/{symbol}",
     "/auth/register", "/auth/login", "/auth/me",
     "/auth/verify-email", "/auth/resend-verification", "/auth/logout-all",
+    "/auth/password-reset/request", "/auth/password-reset/confirm",
+    "/auth/change-password",
     "/me/personal",
     "/ops/jobs", "/ops/jobs/{job_name}",
     "/admin", "/admin/overview", "/admin/users", "/admin/users/{user_id}", "/admin/jobs",

@@ -204,6 +204,10 @@ class Settings(BaseSettings):
     jwt_secret: str = ""
     jwt_expire_hours: int = 24 * 7        # tokens valid for 7 days
     password_min_length: int = 8
+    # Password-reset link lifetime. The plan's window is 30–60 minutes:
+    # long enough to find the email, short enough that a link sitting in an
+    # inbox for a day is dead.
+    password_reset_token_ttl_minutes: int = 45
 
     # ── Email verification (SendGrid Web API) ─────────────────────────
     # Signup verification: every new account gets an emailed verification

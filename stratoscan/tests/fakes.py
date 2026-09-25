@@ -94,6 +94,8 @@ class FakeUserDB:
             # against it — a fake user without the key would silently take
             # the ``.get(..., 0)`` default and mask a broken comparison.
             "token_version": 0,
+            "reset_token_hash": None,
+            "reset_token_expires": None,
             "created_at": "2026-07-31T00:00:00Z",
         }
         self._next_id += 1
@@ -176,6 +178,55 @@ class FakeUserDB:
         """Mirror PostgresDB.bump_token_version (same signature + return)."""
         for user in self._users.values():
             if user["id"] == user_id:
+                user["token_version"] += 1
+                return user["token_version"]
+        return 0
+
+    def set_password_reset_token(
+        self, user_id: int, token_hash: str, expires_at: str
+    ) -> None:
+        """Mirror PostgresDB.set_password_reset_token (overwrites any prior hash)."""
+        for user in self._users.values():
+            if user["id"] == user_id:
+                user["reset_token_hash"] = token_hash
+                user["reset_token_expires"] = expires_at
+                return
+
+    def get_user_by_reset_token_hash(self, token_hash: str) -> Dict[str, Any] | None:
+        """Mirror PostgresDB.get_user_by_reset_token_hash."""
+        for user in self._users.values():
+            if token_hash and user.get("reset_token_hash") == token_hash:
+                return {
+                    "id": user["id"],
+                    "email": user["email"],
+                    "reset_token_expires": user["reset_token_expires"],
+                }
+        return None
+
+    def complete_password_reset(
+        self, user_id: int, token_hash: str, password_hash: str
+    ) -> int | None:
+        """Mirror PostgresDB.complete_password_reset, including its single-use
+        guard: the update only lands if the row STILL holds this hash."""
+        for user in self._users.values():
+            if user["id"] == user_id and user.get("reset_token_hash") == token_hash:
+                user["password_hash"] = password_hash
+                user["reset_token_hash"] = None
+                user["reset_token_expires"] = None
+                user["email_verified"] = True
+                user["verification_token"] = None
+                user["verification_token_expires"] = None
+                user["token_version"] += 1
+                return user["token_version"]
+        return None
+
+    def change_password(self, user_id: int, password_hash: str) -> int:
+        """Mirror PostgresDB.change_password (also clears a pending reset)."""
+        for user in self._users.values():
+            if user["id"] == user_id:
+                user["password_hash"] = password_hash
+                user["reset_token_hash"] = None
+                user["reset_token_expires"] = None
                 user["token_version"] += 1
                 return user["token_version"]
         return 0

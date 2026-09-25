@@ -30,7 +30,7 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 | Auth level | Meaning | Endpoints |
 |---|---|---|
 | `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email` |
-| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/me/personal` |
+| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/me/personal` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -261,8 +261,35 @@ user's watchlist and saved screeners follow them across devices.
 | GET | `/auth/verify-email` | none | `?token=` | `{error: false, verified: true, email, message}` |
 | POST | `/auth/verify-email` | none | `{token}` | same as GET |
 | POST | `/auth/resend-verification` | bearer | — | `{error: false, email_sent, message}` |
+| POST | `/auth/logout-all` | bearer | — | `{error: false, token_version, message}` — the caller's own token dies too |
+| POST | `/auth/password-reset/request` | none | `{email}` | `{error: false, message}` — **identical** for unknown addresses |
+| POST | `/auth/password-reset/confirm` | none | `{token, new_password}` | `{error: false, message}`; 400 invalid/used/expired, 422 weak password |
+| POST | `/auth/change-password` | bearer | `{current_password, new_password}` | `{error: false, access_token, token_type, expires_in, message}` |
 
 Register/login return the same shape: `{access_token, token_type, expires_in, user, email_sent}`.
+
+### Sessions are revocable
+
+Every JWT carries a `ver` claim matched against the account's `token_version`
+on each authenticated request. Bumping it — `/auth/logout-all`, a completed
+password reset, or a password change — makes every previously issued token
+return **401**. The client needs no new code for this: the existing 401
+handler (§2) already clears the session. After `/auth/change-password`,
+store the returned `access_token`: the old one is dead, including on the
+device that made the change.
+
+### Password reset flow
+
+1. `POST /auth/password-reset/request {email}` → always 200 with the same
+   message, after the same minimum time, whether or not the account exists.
+   Show that message verbatim; never infer anything from it.
+2. The email links to `{APP_BASE_URL}/reset-password?token=…` (45-minute,
+   single-use; requesting another link cancels the previous one).
+3. `POST /auth/password-reset/confirm {token, new_password}` → 200, then send
+   the user to `/login`. Every existing session is signed out.
+
+A wrong `current_password` on `/auth/change-password` is **400, not 401** —
+deliberately, so a typo does not trip the 401 auto-logout.
 
 ### Silent refresh — NOT implemented
 
@@ -306,14 +333,16 @@ ratelimit-reset: 1785946800
 Budgets (per scope, from `/meta`): `screen 5/min · 50/day`,
 `interpret 10/min · 100/day`, `enrich 3/min · 20/day`,
 `backtest 2/min · 10/day`, `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
-`auth 10/min · 50/day`, `register 3/min · 10/day`. Global shared buckets
-additionally cap LLM usage across all users (`screener_llm` 900/day,
-`backtest_llm` 200/day). `OPTIONS` preflights are never counted.
+`auth 10/min · 50/day`, `register 3/min · 10/day`, `reset 3/min · 10/day`
+(`/auth/password-reset/*`). Global shared buckets additionally cap usage
+across all users (`screener_llm` 900/day, `backtest_llm` 200/day, and
+`auth_register` 50/day, which `register` and `reset` share because both
+send email). `OPTIONS` preflights are never counted.
 
 The per-IP default (the `read` bucket — every endpoint not explicitly
 scoped above) is env-configurable in production: `RATE_LIMIT_PER_MINUTE`
 (default `60`) and `RATE_LIMIT_PER_DAY` (default `1000`; weekly = 5× daily).
-The LLM/Finnhub-costly scopes (screen, enrich, backtest, refresh, register)
+The LLM/Finnhub/email-costly scopes (screen, enrich, backtest, refresh, register, reset)
 are cost shields and keep their own tighter caps — the two env vars only
 move the per-IP default, never the per-scope shields.
 

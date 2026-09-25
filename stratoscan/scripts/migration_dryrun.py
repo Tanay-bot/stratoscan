@@ -56,7 +56,32 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-HEAD_REVISION = "c1d2e3f4a5b6"  # must stay in sync with alembic/versions/ head
+def _alembic_head() -> str:
+    """The single head of the revision chain, read from alembic/versions/.
+
+    Derived rather than hard-coded: a literal here had to be hand-edited by
+    every migration, and a stale one fails this gate on a CORRECT migration.
+    """
+    versions = os.path.join(HERE, "alembic", "versions")
+    revs, downs = set(), set()
+    for name in os.listdir(versions):
+        if not name.endswith(".py") or name.startswith("__"):
+            continue
+        with open(os.path.join(versions, name), encoding="utf-8") as fh:
+            src = fh.read()
+        rev = re.search(r'^revision: str = "([^"]+)"', src, re.M)
+        down = re.search(r'^down_revision:[^=]*= "([^"]+)"', src, re.M)
+        if rev:
+            revs.add(rev.group(1))
+        if down:
+            downs.add(down.group(1))
+    heads = sorted(revs - downs)
+    if len(heads) != 1:
+        raise SystemExit(f"expected exactly one alembic head, found {heads}")
+    return heads[0]
+
+
+HEAD_REVISION = _alembic_head()
 
 # Expected tables after ``alembic upgrade head`` (runtime + migration DDL).
 EXPECTED_TABLES = {

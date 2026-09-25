@@ -312,6 +312,10 @@ marks orphaned async backtest jobs as `interrupted`.
 | GET | `/auth/verify-email` | token qs | flips `email_verified` |
 | POST | `/auth/verify-email` | body token | same via JSON body |
 | POST | `/auth/resend-verification` | Bearer | re-send email |
+| POST | `/auth/logout-all` | Bearer | bump `token_version` → every token 401s |
+| POST | `/auth/password-reset/request` | — | email a single-use link; identical response + timing for unknown addresses |
+| POST | `/auth/password-reset/confirm` | — | set password, verify email, revoke all sessions |
+| POST | `/auth/change-password` | Bearer | revoke other sessions; returns a fresh token (wrong current pw = 400, never 401) |
 | POST | `/screen` | — | NL query → ranked, paginated stocks (60s cache) |
 | POST | `/interpret` | — | debug: NL query → filters only |
 | POST | `/backtest` | Bearer | full backtest (20-min frontend timeout) |
@@ -768,10 +772,11 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
    | `refresh` | 1 | 10 | 50 | `/refresh` |
    | `auth` | 10 | 50 | 350 | `/auth/*` except register |
    | `register` | 3 | 10 | 30 | `/auth/register` (SendGrid cost shield) |
+   | `reset` | 3 | 10 | 30 | `/auth/password-reset/*` (sends email; shares `auth_register` global) |
 
 2. **Global buckets** (all users share; fixed 24h): `screener_llm` 900/day (screen+interpret+
    enrich), `backtest_llm` 200/day, `refresh_ops` 3/day (each refresh fires thousands of
-   Finnhub calls), `auth_register` 50/day (planet-wide signup cap protecting SendGrid).
+   Finnhub calls), `auth_register` 50/day (planet-wide cap on email-sending auth actions — register + reset — protecting SendGrid).
 
 **Behavior:**
 - `RATE_LIMIT_ENABLED` master switch; `RATE_LIMIT_BYPASS_IPS` comma-separated whitelist.
