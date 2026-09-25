@@ -44,7 +44,7 @@ expected = {
     "/backtest/async", "/backtest/async/{job_id}",
     "/stocks", "/stocks/{symbol}", "/refresh", "/news", "/news/{symbol}",
     "/auth/register", "/auth/login", "/auth/me",
-    "/auth/verify-email", "/auth/resend-verification",
+    "/auth/verify-email", "/auth/resend-verification", "/auth/logout-all",
     "/me/personal",
     "/ops/jobs", "/ops/jobs/{job_name}",
     "/admin", "/admin/overview", "/admin/users", "/admin/users/{user_id}", "/admin/jobs",

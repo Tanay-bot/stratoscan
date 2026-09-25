@@ -1351,14 +1351,16 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
       - /admin/* and /ops/* are admin-gated (require_admin)
       - /refresh is admin-gated
       - /backtest requires a bearer token (get_current_user)
-      - /auth/me and /auth/resend-verification require a token
+      - /auth/me, /auth/resend-verification and /auth/logout-all require a token
       - everything else is public (rate-limited only)
     """
     if path.startswith(("/admin", "/ops", "/refresh")):
         return "admin"
     if path.startswith("/backtest"):
         return "bearer"
-    if path in ("/auth/me", "/auth/resend-verification") or path.startswith("/me/"):
+    if path in (
+        "/auth/me", "/auth/resend-verification", "/auth/logout-all"
+    ) or path.startswith("/me/"):
         return "bearer"
     return "none"
 
@@ -1668,7 +1670,8 @@ async def register(request: Request, response: Response, payload: RegisterReques
     # in the very response that creates the session — no re-login needed.
     is_admin = _bootstrap_admin_role(db, email, user_id, False)
 
-    token = create_access_token(user_id, email)
+    # A freshly created row is token_version 0 (the column default).
+    token = create_access_token(user_id, email, 0)
     # The user row was just created with plan='free'; the only extra write is
     # the (rare) ADMIN_EMAILS bootstrap UPDATE above when the email is listed.
     logger.info(
@@ -1770,7 +1773,12 @@ async def login(request: Request, response: Response, payload: LoginRequest):
             ),
         )
 
-    token = create_access_token(user["id"], user["email"])
+    # Stamp the row's CURRENT version, not 0: after a /auth/logout-all bump
+    # the account's version is >0, and a token minted at 0 would be rejected
+    # by get_current_user on its very first authenticated request.
+    token = create_access_token(
+        user["id"], user["email"], user.get("token_version", 0)
+    )
     logger.info(
         "Login: %s (id=%d, plan=%s, verified=%s)",
         email, user["id"], user.get("plan"), email_verified,
@@ -2060,6 +2068,47 @@ async def resend_verification(
             if email_sent
             else "Could not send the verification email right now. Try again later."
         ),
+    }
+
+
+@app.post(
+    "/auth/logout-all",
+    response_model=Dict[str, Any],
+    summary="Revoke every token this account has issued",
+    tags=["Auth"],
+)
+
+async def logout_all(
+    request: Request,
+    response: Response,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Log out everywhere: invalidate every JWT this account holds.
+
+    Bumps ``users.token_version``, which ``get_current_user`` compares
+    against the ``ver`` claim of every token on every authenticated
+    request. The caller's own token is therefore dead as soon as this
+    returns — that is the point (a stolen laptop, a leaked token), and the
+    frontend's 401 handler turns it into a normal logout. Log in again to
+    mint a token carrying the new version.
+    """
+    from src.database import PostgresDB
+
+    try:
+        new_version = PostgresDB().bump_token_version(int(user["id"]))
+    except Exception as e:
+        logger.error("Token revocation failed for user %s: %s", user["id"], e)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not log out all sessions right now. Try again later.",
+        )
+    logger.info(
+        "User %s revoked all sessions (token_version=%d)", user["id"], new_version
+    )
+    return {
+        "error": False,
+        "token_version": new_version,
+        "message": "All sessions are logged out. Log in again for a new token.",
     }
 
 

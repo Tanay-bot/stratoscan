@@ -127,12 +127,16 @@ def _b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
-def create_access_token(user_id: int, email: str) -> str:
+def create_access_token(user_id: int, email: str, token_version: int = 0) -> str:
     """Create a signed JWT (HS256) for a user.
 
     Args:
         user_id: The user's database id (the ``sub`` claim).
         email: The user's email (for convenience/debugging).
+        token_version: The user's current ``users.token_version``, stamped
+            as the ``ver`` claim. ``get_current_user`` rejects a token whose
+            ``ver`` does not match the row, which is what makes a bump of
+            that column revoke every token the account has issued.
 
     Returns:
         A three-part ``header.payload.signature`` token string.
@@ -142,6 +146,7 @@ def create_access_token(user_id: int, email: str) -> str:
     payload = {
         "sub": str(user_id),
         "email": email,
+        "ver": token_version,
         "iat": now,
         _TOKEN_TTL: now + settings.jwt_expire_hours * 3600,
     }
@@ -243,6 +248,23 @@ def get_current_user(request: Request) -> Dict[str, Any]:
             status_code=401,
             detail="Account no longer exists. Log in again.",
         )
+
+    # Revocation check. The user row is already loaded above, so this costs
+    # one integer comparison — no extra query, no cache, no blocklist.
+    # Bumping users.token_version (POST /auth/logout-all) invalidates every
+    # token the account ever issued, including the caller's own.
+    #
+    # Deliberately NOT ``payload.get("ver", 0)``: a token minted before this
+    # claim existed has no ``ver``, and defaulting it to 0 would make
+    # pre-change tokens permanently unrevocable — exactly the hole this
+    # closes. Rejecting them logs every pre-existing session out once, which
+    # is the intended behaviour.
+    if payload.get("ver") != user.get("token_version", 0):
+        raise HTTPException(
+            status_code=401,
+            detail="Session expired. Log in again.",
+        )
+
     return user
 
 

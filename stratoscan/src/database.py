@@ -442,6 +442,12 @@ NEWS_INDEXES = [
 # and its ``verification_token_expires`` deadline. GET /auth/verify-email
 # flips the flag on a valid token. Login may be blocked for unverified
 # accounts when settings.email_verification_required is True.
+#
+# ``token_version`` is the session-revocation counter (src/auth.py):
+# ``create_access_token`` stamps it as the ``ver`` claim and
+# ``get_current_user`` rejects any token whose claim doesn't match the
+# row, so incrementing it (POST /auth/logout-all) instantly invalidates
+# every token the account ever issued.
 USERS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id                  BIGSERIAL PRIMARY KEY,
@@ -452,6 +458,7 @@ CREATE TABLE IF NOT EXISTS users (
     verification_token  TEXT,
     verification_token_expires TIMESTAMPTZ,
     is_admin            BOOLEAN NOT NULL DEFAULT FALSE,
+    token_version       INTEGER NOT NULL DEFAULT 0,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 """
@@ -475,6 +482,14 @@ USERS_EMAIL_VERIFICATION_BACKFILL = [
     # Admin role column (gates the /admin dashboard). Idempotent — no-op
     # on databases that already have it.
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
+]
+
+# Session-revocation counter (src/auth.py / POST /auth/logout-all). Same
+# idempotent-backfill contract as above: this is what heals a database
+# created before the column existed (the Alembic revision covers managed
+# ones, this covers a bare deploy — see CLAUDE.md §18).
+USERS_TOKEN_VERSION_BACKFILL = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
 ]
 
 # ── PostgreSQL (main DB): job_runs table ─────────────────────────────
@@ -643,9 +658,13 @@ class PostgresDB:
                 for idx in STOCK_MASTER_INDEXES:
                     cur.execute(idx)
                 cur.execute(USERS_SCHEMA)
-                # Backfill the email-verification columns on databases created
-                # before the feature shipped (no-op on fresh installs).
-                for stmt in USERS_EMAIL_VERIFICATION_BACKFILL:
+                # Backfill users columns added after the table shipped
+                # (email verification, is_admin, token_version) — each
+                # statement independently guarded so one failure can't
+                # abort the rest; no-ops on fresh installs.
+                for stmt in (
+                    USERS_EMAIL_VERIFICATION_BACKFILL + USERS_TOKEN_VERSION_BACKFILL
+                ):
                     try:
                         cur.execute(stmt)
                     except Exception as e:
@@ -734,10 +753,11 @@ class PostgresDB:
 
         Returns:
             Dict with id, email, password_hash, plan, email_verified,
-            created_at — or None.
+            is_admin, token_version, created_at — or None.
         """
         sql = """
-            SELECT id, email, password_hash, plan, email_verified, is_admin, created_at
+            SELECT id, email, password_hash, plan, email_verified, is_admin,
+                   token_version, created_at
             FROM users WHERE email = %s
         """
         with self._get_conn() as conn:
@@ -754,10 +774,13 @@ class PostgresDB:
 
         Returns:
             Dict with id, email, password_hash, plan, email_verified,
-            created_at — or None.
+            is_admin, token_version, created_at — or None. ``token_version``
+            is what ``get_current_user`` compares the token's ``ver`` claim
+            against on every authenticated request.
         """
         sql = """
-            SELECT id, email, password_hash, plan, email_verified, is_admin, created_at
+            SELECT id, email, password_hash, plan, email_verified, is_admin,
+                   token_version, created_at
             FROM users WHERE id = %s
         """
         with self._get_conn() as conn:
@@ -847,6 +870,38 @@ class PostgresDB:
                 )
             conn.commit()
         logger.info("User %d admin role set to %s", user_id, is_admin)
+
+    def bump_token_version(self, user_id: int) -> int:
+        """Invalidate every token this user currently holds.
+
+        Backs POST /auth/logout-all. The increment happens in the UPDATE
+        itself (``token_version + 1``) rather than a read-modify-write, so
+        two concurrent "log out everywhere" calls cannot lose each other's
+        bump.
+
+        Args:
+            user_id: The user's database id.
+
+        Returns:
+            The new version. Tokens minted with the previous version — and
+            every token minted before this feature existed — now fail the
+            check in ``get_current_user``.
+        """
+        sql = (
+            "UPDATE users SET token_version = token_version + 1 "
+            "WHERE id = %s RETURNING token_version"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id,))
+                row = cur.fetchone()
+            conn.commit()
+        # No row = no such user. Unreachable from the API (the caller is an
+        # authenticated user resolved from this same table), returned rather
+        # than raised so the method is total.
+        new_version = int(row[0]) if row else 0
+        logger.info("User %d token_version bumped to %d", user_id, new_version)
+        return new_version
 
     def user_stats(self) -> Dict[str, Any]:
         """Aggregate user counts for the admin overview.

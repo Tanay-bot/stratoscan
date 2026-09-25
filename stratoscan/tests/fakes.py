@@ -89,6 +89,11 @@ class FakeUserDB:
             "verification_token": verification_token,
             "verification_token_expires": verification_token_expires,
             "is_admin": is_admin,
+            # Session-revocation counter. It MUST be present: real rows carry
+            # it, and get_current_user compares the token's ``ver`` claim
+            # against it — a fake user without the key would silently take
+            # the ``.get(..., 0)`` default and mask a broken comparison.
+            "token_version": 0,
             "created_at": "2026-07-31T00:00:00Z",
         }
         self._next_id += 1
@@ -166,6 +171,14 @@ class FakeUserDB:
             if user["id"] == user_id:
                 user["is_admin"] = bool(is_admin)
                 return
+
+    def bump_token_version(self, user_id: int) -> int:
+        """Mirror PostgresDB.bump_token_version (same signature + return)."""
+        for user in self._users.values():
+            if user["id"] == user_id:
+                user["token_version"] += 1
+                return user["token_version"]
+        return 0
 
     def list_users(
         self, limit: int = 50, offset: int = 0, search: str | None = None
