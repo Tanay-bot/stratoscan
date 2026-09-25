@@ -193,6 +193,15 @@ export async function logoutEverywhere(): Promise<MessageResponse> {
   return unwrap<MessageResponse>(api.post('/auth/logout-all'))
 }
 
+/** Permanently deletes the account and its saved data. */
+export async function deleteAccount(password: string): Promise<MessageResponse> {
+  if (DEMO_MODE) {
+    await delay(300)
+    return { error: false, message: 'Your account has been deleted.' }
+  }
+  return unwrap<MessageResponse>(api.post('/auth/delete-account', { password }))
+}
+
 // ── Screener ────────────────────────────────────────────────────────────────
 
 export async function screen(req: ScreenRequest): Promise<ScreenResponse> {

@@ -7,12 +7,13 @@ import {
   MonitorX,
   ShieldCheck,
   Sparkles,
+  Trash2,
   User as UserIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { fieldLabel } from '@/components/AuthShell'
-import { changePassword, logoutEverywhere } from '@/lib/api/services'
+import { changePassword, deleteAccount, logoutEverywhere } from '@/lib/api/services'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/store/auth'
@@ -160,6 +161,93 @@ function SecuritySection() {
   )
 }
 
+function DeleteAccountSection() {
+  const { logout } = useAuth()
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [password, setPassword] = useState('')
+  const [typed, setTyped] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const onDelete = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setDeleting(true)
+    try {
+      const res = await deleteAccount(password)
+      logout()
+      toast.info('Account deleted', res.message)
+      navigate('/')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete your account.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <section className="glass rounded-2xl border-loss/20 p-6" aria-label="Delete account">
+      <h2 className="flex items-center gap-2 text-base font-semibold text-loss-soft">
+        <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete account
+      </h2>
+      <p className="mt-1 text-sm text-text-mid">
+        Permanently deletes your account, watchlist, saved screens and backtest history. This cannot
+        be undone.
+      </p>
+      {!open ? (
+        <Button variant="outline" className="mt-4" onClick={() => setOpen(true)}>
+          Delete my account…
+        </Button>
+      ) : (
+        <form className="mt-4 space-y-3" onSubmit={(e) => void onDelete(e)} noValidate>
+          <div className="space-y-1.5">
+            <label htmlFor="delete-password" className={fieldLabel}>
+              Your password
+            </label>
+            <Input
+              id="delete-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="delete-confirm" className={fieldLabel}>
+              Type DELETE to confirm
+            </label>
+            <Input
+              id="delete-confirm"
+              autoComplete="off"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+          </div>
+          {error && (
+            <p role="alert" className="text-xs text-loss-soft">
+              {error}
+            </p>
+          )}
+          <div className="flex gap-3">
+            <Button
+              type="submit"
+              variant="danger"
+              loading={deleting}
+              disabled={!password || typed !== 'DELETE'}
+            >
+              Permanently delete
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </section>
+  )
+}
+
 export function Settings() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -276,6 +364,8 @@ export function Settings() {
           <LogOut className="h-4 w-4" aria-hidden="true" /> Sign out
         </Button>
       </section>
+
+      {!DEMO_MODE && <DeleteAccountSection />}
     </div>
   )
 }
