@@ -36,16 +36,34 @@ If you changed a route, a request model or a response model:
 cd stratoscan && python scripts/regen_openapi.py
 ```
 
-## 2. Baseline — these are ALREADY red. You did not cause them. Do not chase them.
+## 2. Baseline — nothing is red. Measure it, never quote it.
 
-| Suite | Why it fails today |
-|---|---|
-| `tests.test_cache` | asserts an LLM call for a query the deterministic parser now handles (conf 1.00) |
-| `tests.test_api_dirty_data` | deterministic path bypasses the suite's router mock; the fixture never satisfies the resulting rules |
-| `tests.test_backfill` | §6 calls real yfinance; fails without outbound network |
+**Every backend suite passes.** There is no known-red list any more: the three suites that
+used to be here (`test_cache`, `test_api_dirty_data`, `test_backfill`) were fixed by tasks
+001–003. So a red suite is a real failure, and almost certainly yours.
 
-Everything else passes: **36/39 backend, 205/205 frontend, ruff clean.** If your change makes
-that number go down, you broke something. Check the baseline before assuming a red suite is yours.
+Do not trust a count written in prose — including any count written below. Measure it
+before you start, and again before you push:
+
+```bash
+cd stratoscan
+export JWT_SECRET=ci-dummy-jwt-secret
+for t in tests/test_*.py; do
+  python -m "tests.$(basename "$t" .py)" >/dev/null 2>&1 || echo "FAIL $t"
+done
+ruff check .
+```
+
+Prints nothing and "All checks passed!" = clean. Frontend: `npm test` in `frontend/`.
+
+Your task spec's **Baseline** section states the number expected on the day it was written.
+If the measurement disagrees with the spec, say so and stop — do not fix an unrelated suite
+to make the number match, and do not assume the spec is right.
+
+> This section was itself stale for several tasks: it claimed 36/39 with three suites red
+> when the tree was at 41/41 and green. An executor following it would have dismissed a
+> real failure as pre-existing. That is why it now tells you to run the command instead of
+> reading a number.
 
 ## 3. Hard nevers
 
@@ -60,7 +78,7 @@ Each of these is here because it actually happened in this repo.
 | **Never assume a config convention transfers between hosts.** | `public/_headers` is a Cloudflare/Netlify format. This project deploys to Vercel, which ignores it — so production shipped with no CSP, no HSTS, no `X-Frame-Options` while two docs claimed it was hardened. Headers live in `frontend/vercel.json`. |
 | **Never leave a shell or YAML path unexecuted and assume it works.** | The deploy healthcheck had `${VAR:-...` with a missing `}` — an unterminated expansion nobody could hit locally. If you write shell in a workflow, `bash -n` it. |
 | **Never add a `Settings` field without adding the key to `.env.example`.** | `validate_env_template()` fails the boot. `USE_DETERMINISTIC_INTERPRETER` had already slipped through. |
-| **When you change behavior, reconcile every test that encoded the old behavior.** | The hybrid-parser commit touched three source files and zero tests, leaving two suites red — the two in the baseline above. |
+| **When you change behavior, reconcile every test that encoded the old behavior.** | The hybrid-parser commit touched three source files and zero tests, leaving `test_cache` and `test_api_dirty_data` red for weeks — and §2 above then described that staleness as normal. |
 | **Never skip, disable, xfail or delete a test to get green.** | Fix the cause or say you could not. |
 | **Never widen the task.** | Do what the spec says and nothing else. No drive-by refactors, no reformatting, no renames, no "while I was in there". |
 
