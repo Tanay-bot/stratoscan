@@ -7,9 +7,11 @@ in .env, or every function is a no-op):
 
   - **Webhook** (``ALERT_WEBHOOK_URL``): a Slack/Discord/ntfy-compatible
     incoming webhook. Preferred when set.
-  - **Email** (``ALERT_EMAIL`` + SendGrid): delivered through the existing
-    stdlib-only SendGrid client in ``src/emails.py`` (the same client that
-    sends verification emails). Used when no webhook is configured.
+  - **Email** (``ALERT_EMAIL`` + a mail transport): delivered through the
+    existing stdlib-only sender in ``src/emails.py`` (the same one that
+    sends verification emails), over whichever transport
+    ``settings.mail_transport`` resolves to — SendGrid's API, or SMTP when
+    ``SMTP_HOST`` is set. Used when no webhook is configured.
 
 Design (the Stratoscan way — near-zero cost, never breaks the job):
   - **Fire-and-forget**: the POST/send runs in a daemon thread; the caller
@@ -76,13 +78,13 @@ def _dispatch_webhook(title: str, message: str, level: str) -> None:
 
 
 def _dispatch_email(title: str, message: str, level: str) -> None:
-    """Send the alert through the existing SendGrid client (blocking).
+    """Send the alert through the configured mail transport (blocking).
 
-    Reuses ``src.emails.send_email`` — the same stdlib-only mail sender
-    that handles verification mail (SendGrid API or SMTP, per ``SMTP_HOST``)
-    — so alerts need no new dependency and
-    only a recipient (``ALERT_EMAIL``) on top of the already-configured
-    ``SENDGRID_API_KEY`` + ``EMAIL_FROM_ADDRESS``.
+    Reuses ``src.emails.send_email`` — the same stdlib-only sender that
+    handles verification mail, over SendGrid's API or SMTP per
+    ``SMTP_HOST`` — so alerts need no new dependency, and nothing beyond a
+    recipient (``ALERT_EMAIL``) on top of the transport and
+    ``EMAIL_FROM_ADDRESS`` that ``settings.alerts_enabled`` already gates on.
     """
     from src.emails import send_email
 
