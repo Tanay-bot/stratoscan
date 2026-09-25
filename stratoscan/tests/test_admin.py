@@ -123,76 +123,95 @@ assert r.status_code == 200, f"admin must 200: {r.status_code} {r.text[:200]}"
 print("✅ 401 no token / 401 forged / 403 non-admin / 200 admin")
 
 
-# ── 2. ADMIN_EMAILS bootstrap at login ──────────────────────────────────────
+# ── 2. ADMIN_EMAILS bootstrap at login — only for a VERIFIED address ─────────
 print("2. ADMIN_EMAILS bootstrap...")
-# Patch settings.admin_emails so bob becomes an admin on his NEXT login.
-with mock.patch("src.api.settings") as ms:
-    ms.jwt_secret = os.environ.get("JWT_SECRET", "test-secret")
-    ms.jwt_expire_hours = 24 * 7
-    ms.admin_email_list = ["bob@stratoscan.app"]
-    ms.email_verification_required = False
-    r = client.post(
-        "/auth/login",
-        json={"email": "bob@stratoscan.app", "password": "bobpass1234"},
-    )
+
+
+def _login_as_listed(email: str, password: str, *, gate: bool = False):
+    with mock.patch("src.api.settings") as ms:
+        ms.jwt_secret = os.environ.get("JWT_SECRET", "test-secret")
+        ms.jwt_expire_hours = 24 * 7
+        ms.admin_email_list = [email]
+        ms.email_verification_required = gate
+        return client.post("/auth/login", json={"email": email, "password": password})
+
+
+# bob is seeded email_verified=False. Listed but unverified → NOT promoted.
+# (Before Day 3 this granted admin: an address is not an identity until its
+# inbox has been proved, and ADMIN_EMAILS names an address.)
+r = _login_as_listed("bob@stratoscan.app", "bobpass1234")
+assert r.status_code == 200, r.text
+assert r.json()["user"]["is_admin"] is False, "unverified listed address must NOT be promoted"
+assert fake_db.get_user_by_email("bob@stratoscan.app")["is_admin"] is False
+print("✅ listed but unverified → login succeeds, admin NOT granted")
+
+# ...and the same login after verification → promoted. The pair is what shows
+# the check is on verification, not a blanket refusal.
+fake_db.mark_email_verified(fake_db.get_user_by_email("bob@stratoscan.app")["id"])
+r = _login_as_listed("bob@stratoscan.app", "bobpass1234")
 assert r.status_code == 200, r.text
 bob_row = fake_db.get_user_by_email("bob@stratoscan.app")
-assert bob_row["is_admin"] is True, "ADMIN_EMAILS login must grant admin"
+assert bob_row["is_admin"] is True, "a verified ADMIN_EMAILS login must grant admin"
 r = client.get("/admin/overview", headers=_auth_headers(bob_tok))
 assert r.status_code == 200, f"newly-promoted bob must 200: {r.status_code}"
-# Idempotent: a second login with the same admin email is a no-op (no error).
-with mock.patch("src.api.settings") as ms:
-    ms.jwt_secret = os.environ.get("JWT_SECRET", "test-secret")
-    ms.jwt_expire_hours = 24 * 7
-    ms.admin_email_list = ["bob@stratoscan.app"]
-    ms.email_verification_required = False
-    r = client.post(
-        "/auth/login",
-        json={"email": "bob@stratoscan.app", "password": "bobpass1234"},
-    )
+r = _login_as_listed("bob@stratoscan.app", "bobpass1234")  # idempotent
 assert r.status_code == 200, r.text
-print("✅ bootstrap grants admin at login + idempotent")
+print("✅ once verified → bootstrap grants admin at login + idempotent")
 
 # ── 2b. ADMIN_EMAILS bootstrap at REGISTER ───────────────────────────────────
-# The first admin typically signs up, not logs in: a listed email must be
-# granted the role at signup AND reported in the very response that creates
-# the session (is_admin=True), so the frontend admin nav lights up with no
-# logout/login cycle. dana is brand new — no prior row.
 print("2b. ADMIN_EMAILS bootstrap at register...")
-with mock.patch("src.api.settings") as ms:
-    ms.jwt_secret = os.environ.get("JWT_SECRET", "test-secret")
-    ms.jwt_expire_hours = 24 * 7
-    ms.admin_email_list = ["dana@stratoscan.app"]
-    ms.email_verification_required = False
-    ms.has_email_verification = False  # hermetic: no SendGrid call at signup
-    r = client.post(
-        "/auth/register",
-        json={"email": "dana@stratoscan.app", "password": "danapass123"},
-    )
-assert r.status_code == 200, r.text
-assert r.json()["user"]["is_admin"] is True, (
-    "register response must report is_admin=True for an ADMIN_EMAILS address"
-)
-dana_row = fake_db.get_user_by_email("dana@stratoscan.app")
-assert dana_row["is_admin"] is True, "ADMIN_EMAILS register must grant admin"
-print("✅ bootstrap grants admin at register + reported in the response")
 
-# A listed admin email BYPASSES the email-verification gate: the bootstrap
-# login must never be blocked by a verification link (chicken-and-egg —
-# the first admin login is how the role gets granted). bob is seeded
-# email_verified=False, so with the gate ON and bob on the admin list,
-# the login must still succeed — WITHOUT the bypass this returns 403.
-with mock.patch("src.api.settings") as ms:
-    ms.jwt_secret = os.environ.get("JWT_SECRET", "test-secret")
-    ms.jwt_expire_hours = 24 * 7
-    ms.admin_email_list = ["bob@stratoscan.app"]
-    ms.email_verification_required = True  # gate ON, bob is unverified + on the admin list
-    r = client.post(
-        "/auth/login",
-        json={"email": "bob@stratoscan.app", "password": "bobpass1234"},
-    )
-assert r.status_code == 200, f"admin bypass must 200: {r.status_code} {r.text[:200]}"
-print("✅ ADMIN_EMAILS bypasses the email-verification gate (bootstrap never dead-locks)")
+
+def _register_as_listed(email: str, *, mail_configured: bool):
+    with mock.patch("src.api.settings") as ms:
+        ms.jwt_secret = os.environ.get("JWT_SECRET", "test-secret")
+        ms.jwt_expire_hours = 24 * 7
+        ms.admin_email_list = [email]
+        ms.email_verification_required = False
+        # No transport → accounts start verified (there is no link to click),
+        # so the operator's local bootstrap stays one step, as before.
+        ms.has_email_verification = mail_configured
+        ms.email_verification_token_ttl_hours = 24
+        with mock.patch("src.emails.send_verification_email", return_value=True):
+            return client.post("/auth/register", json={"email": email, "password": "listedpass123"})
+
+
+r = _register_as_listed("dana@stratoscan.app", mail_configured=False)
+assert r.status_code == 200, r.text
+assert r.json()["user"]["is_admin"] is True, "no mail transport → verified at birth → admin"
+assert fake_db.get_user_by_email("dana@stratoscan.app")["is_admin"] is True
+print("✅ no mail transport: register grants admin in the same response (dev bootstrap unchanged)")
+
+# THE ESCALATION this closes. With mail configured, a stranger registers the
+# operator's address before the operator does. They cannot read that inbox,
+# so they must get an ordinary, unverified, non-admin account.
+r = _register_as_listed("founder@stratoscan.app", mail_configured=True)
+assert r.status_code == 200, r.text
+body = r.json()
+assert body["user"]["email_verified"] is False
+assert body["user"]["is_admin"] is False, "an unverified registrant of a listed address must NOT be admin"
+assert fake_db.get_user_by_email("founder@stratoscan.app")["is_admin"] is False
+r = client.get("/admin/users", headers=_auth_headers(body["access_token"]))
+assert r.status_code == 403, f"squatter must not reach the admin API: {r.status_code}"
+print("✅ squatting a listed address with mail on → no admin, /admin/users 403")
+
+# No exemption from the verification gate for listed addresses any more: it
+# existed only because the grant happened at login; it now let a squatter in.
+eve_id = fake_db.create_user(
+    "eve@stratoscan.app", hash_password("evepass1234"), plan="free", email_verified=False,
+)
+r = _login_as_listed("eve@stratoscan.app", "evepass1234", gate=True)
+assert r.status_code == 403, f"listed + unverified + gate ON must be 403: {r.status_code} {r.text[:200]}"
+assert fake_db.get_user_by_email("eve@stratoscan.app")["is_admin"] is False
+fake_db.mark_email_verified(eve_id)
+r = _login_as_listed("eve@stratoscan.app", "evepass1234", gate=True)
+assert r.status_code == 200 and r.json()["user"]["is_admin"] is True, r.text
+print("✅ gate ON: listed + unverified → 403; the same account once verified → 200 + admin")
+
+# Later sections pin a fixture of exactly four users (admin, bob, carol, dana);
+# remove the two accounts this section created to probe the escalation.
+for _probe in ("founder@stratoscan.app", "eve@stratoscan.app"):
+    fake_db.delete_user(fake_db.get_user_by_email(_probe)["id"], _probe)
 
 
 # ── 3. Overview aggregation ─────────────────────────────────────────────────

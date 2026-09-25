@@ -1616,16 +1616,31 @@ def _meta_distinct(column: str) -> SectorCountsResponse:
     return SectorCountsResponse(total=len(values), values=values)
 
 
-def _bootstrap_admin_role(db, email: str, user_id: int, current_is_admin: bool) -> bool:
-    """Grant the admin role when ``email`` is listed in ADMIN_EMAILS.
+def _bootstrap_admin_role(
+    db, email: str, user_id: int, current_is_admin: bool, email_verified: bool
+) -> bool:
+    """Grant the admin role when ``email`` is listed in ADMIN_EMAILS AND verified.
 
     Idempotent and non-fatal: a DB hiccup never blocks register/login — the
     role is simply granted on the next sign-in or via PATCH /admin/users.
 
-    Shared by register and login so the FIRST admin sees ``is_admin=True``
-    in the very response that creates the session — no re-login needed.
+    **Verification is the whole security of this function.** ADMIN_EMAILS
+    names an address, and an address is only an identity once someone has
+    proved they can read its inbox. Without that check, anyone who registers
+    the listed address first — before the operator does, e.g. on a fresh
+    deploy — was handed an admin token in the register response, without
+    ever seeing the inbox. The operator's path is unchanged in spirit:
+    register, click the verification link, log in (or, with no mail
+    transport configured, accounts start verified and the grant is
+    immediate, as before). A completed password reset also verifies, so the
+    real owner can always reclaim a squatted address.
     """
     if email not in settings.admin_email_list or current_is_admin:
+        return current_is_admin
+    if not email_verified:
+        logger.warning(
+            "ADMIN_EMAILS match for %r refused: address not verified", email
+        )
         return current_is_admin
     try:
         db.set_user_admin(user_id, True)
@@ -1717,7 +1732,9 @@ async def register(request: Request, response: Response, payload: RegisterReques
     # Admin bootstrap (same as login): an email listed in ADMIN_EMAILS is
     # granted the role at signup too, so the first admin sees is_admin=True
     # in the very response that creates the session — no re-login needed.
-    is_admin = _bootstrap_admin_role(db, email, user_id, False)
+    is_admin = _bootstrap_admin_role(
+        db, email, user_id, False, not settings.has_email_verification
+    )
 
     # A freshly created row is token_version 0 (the column default).
     token = create_access_token(user_id, email, 0)
@@ -1796,23 +1813,23 @@ async def login(request: Request, response: Response, payload: LoginRequest):
     # The same shared helper /auth/register uses, so a listed email is granted
     # the role at signup too and the response reports the real is_admin.
     user["is_admin"] = _bootstrap_admin_role(
-        db, user["email"], user["id"], bool(user.get("is_admin"))
+        db, user["email"], user["id"], bool(user.get("is_admin")),
+        bool(user.get("email_verified")),
     )
 
     # Email verification gate (opt-in via EMAIL_VERIFICATION_REQUIRED): when
     # enabled, an unverified account can't log in — it gets a 403 pointing
     # at /auth/resend-verification instead. Off by default so existing
-    # accounts and dev flows keep working. Accounts whose email is listed
-    # in ADMIN_EMAILS BYPASS the gate: the operator explicitly trusts that
-    # address in .env, so the bootstrap login must never be blocked by a
-    # verification link (chicken-and-egg — the first admin login is how
-    # the role gets granted).
+    # accounts and dev flows keep working.
+    #
+    # There is deliberately NO exemption for ADMIN_EMAILS addresses. One used
+    # to exist to avoid a chicken-and-egg (the role was granted at login), but
+    # it let anyone who registered the operator's address log in unverified —
+    # and, with the grant not checking verification either, become admin. The
+    # grant now requires a verified address, so the exemption bought nothing
+    # but the hole.
     email_verified = bool(user.get("email_verified"))
-    if (
-        settings.email_verification_required
-        and not email_verified
-        and email not in settings.admin_email_list
-    ):
+    if settings.email_verification_required and not email_verified:
         raise HTTPException(
             status_code=403,
             detail=(
