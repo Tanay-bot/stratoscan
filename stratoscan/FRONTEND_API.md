@@ -30,7 +30,7 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 | Auth level | Meaning | Endpoints |
 |---|---|---|
 | `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email` |
-| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/me/personal` |
+| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/me/personal` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -265,6 +265,7 @@ user's watchlist and saved screeners follow them across devices.
 | POST | `/auth/password-reset/request` | none | `{email}` | `{error: false, message}` — **identical** for unknown addresses |
 | POST | `/auth/password-reset/confirm` | none | `{token, new_password}` | `{error: false, message}`; 400 invalid/used/expired, 422 weak password |
 | POST | `/auth/change-password` | bearer | `{current_password, new_password}` | `{error: false, access_token, token_type, expires_in, message}` |
+| POST | `/auth/delete-account` | bearer | `{password}` | `{error: false, message}` — permanent; wrong password is 400 |
 
 Register/login return the same shape: `{access_token, token_type, expires_in, user, email_sent}`.
 
@@ -288,7 +289,7 @@ device that made the change.
 3. `POST /auth/password-reset/confirm {token, new_password}` → 200, then send
    the user to `/login`. Every existing session is signed out.
 
-A wrong `current_password` on `/auth/change-password` is **400, not 401** —
+A wrong password on `/auth/change-password` or `/auth/delete-account` is **400, not 401** —
 deliberately, so a typo does not trip the 401 auto-logout.
 
 ### Silent refresh — NOT implemented

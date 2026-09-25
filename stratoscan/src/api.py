@@ -886,6 +886,12 @@ class ChangePasswordRequest(BaseModel):
     )
 
 
+class DeleteAccountRequest(BaseModel):
+    """Request body for permanently deleting the signed-in account."""
+
+    password: str = Field(..., min_length=1, max_length=128, description="Current password")
+
+
 class VerifyEmailRequest(BaseModel):
     """Request body for the email verification endpoint.
 
@@ -1402,7 +1408,7 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
         return "bearer"
     if path in (
         "/auth/me", "/auth/resend-verification", "/auth/logout-all",
-        "/auth/change-password",
+        "/auth/change-password", "/auth/delete-account",
     ) or path.startswith("/me/"):
         return "bearer"
     return "none"
@@ -2392,6 +2398,62 @@ async def change_password(
         "token_type": "bearer",
         "expires_in": settings.jwt_expire_hours * 3600,
         "message": "Password changed. Every other device has been signed out.",
+    }
+
+
+@app.post(
+    "/auth/delete-account",
+    response_model=Dict[str, Any],
+    summary="Permanently delete the signed-in account and its data",
+    tags=["Auth"],
+)
+async def delete_account(
+    request: Request,
+    response: Response,
+    payload: DeleteAccountRequest,
+    background_tasks: BackgroundTasks,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Delete the account, its saved data and its backtest history.
+
+    Requires the password again: a stolen or left-open session must not be
+    enough to destroy an account irreversibly. As with change-password, a
+    wrong password is a 400, not a 401, so a typo does not log the UI out.
+
+    Afterwards every token the account held fails on the next request, via
+    the missing-user branch of ``get_current_user`` — there is no row left
+    to compare a ``ver`` claim against.
+    """
+    from src.auth import verify_password
+    from src.database import PostgresDB
+    from src.emails import send_account_deleted_email
+
+    if not verify_password(payload.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Your password is incorrect.")
+
+    email = user["email"]
+    try:
+        counts = PostgresDB().delete_user(int(user["id"]), email)
+    except Exception as e:
+        logger.error("Account deletion failed for user %s: %s", user["id"], e)
+        raise HTTPException(
+            status_code=502, detail="Could not delete your account right now. Try again later."
+        )
+
+    # In-flight async backtests live in memory too; drop this account's.
+    with _BACKTEST_JOBS_LOCK:
+        for job_id in [j for j, job in _BACKTEST_JOBS.items() if job.get("user_email") == email]:
+            _BACKTEST_JOBS.pop(job_id, None)
+
+    if settings.has_email_verification:
+        background_tasks.add_task(send_account_deleted_email, email)
+    logger.info(
+        "Account deleted: user %s (%d backtest jobs removed)",
+        user["id"], counts.get("backtest_jobs", 0),
+    )
+    return {
+        "error": False,
+        "message": "Your account and all of its data have been permanently deleted.",
     }
 
 

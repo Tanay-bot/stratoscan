@@ -231,6 +231,16 @@ class FakeUserDB:
                 return user["token_version"]
         return 0
 
+    def delete_user(self, user_id: int, email: str) -> Dict[str, int]:
+        """Mirror PostgresDB.delete_user (user_data goes with the user)."""
+        removed = 0
+        for key, user in list(self._users.items()):
+            if user["id"] == user_id:
+                del self._users[key]
+                removed = 1
+        self._personal.pop(user_id, None)
+        return {"users": removed, "backtest_jobs": 0}
+
     def list_users(
         self, limit: int = 50, offset: int = 0, search: str | None = None
     ) -> List[Dict[str, Any]]:

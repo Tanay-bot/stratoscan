@@ -599,6 +599,50 @@
         }
       }
     },
+    "/auth/delete-account": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Permanently delete the signed-in account and its data",
+        "description": "Delete the account, its saved data and its backtest history.\n\nRequires the password again: a stolen or left-open session must not be\nenough to destroy an account irreversibly. As with change-password, a\nwrong password is a 400, not a 401, so a typo does not log the UI out.\n\nAfterwards every token the account held fails on the next request, via\nthe missing-user branch of ``get_current_user`` \u2014 there is no row left\nto compare a ``ver`` claim against.",
+        "operationId": "delete_account_auth_delete_account_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Delete Account Auth Delete Account Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/screen": {
       "post": {
         "tags": [
@@ -2243,6 +2287,23 @@
         ],
         "title": "ConfigStatus",
         "description": "Configuration status response."
+      },
+      "DeleteAccountRequest": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "description": "Current password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "DeleteAccountRequest",
+        "description": "Request body for permanently deleting the signed-in account."
       },
       "EndpointMeta": {
         "properties": {

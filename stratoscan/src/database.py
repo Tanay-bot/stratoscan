@@ -1114,6 +1114,40 @@ class PostgresDB:
             conn.commit()
         return int(row[0]) if row else 0
 
+    # ── Account deletion ────────────────────────────────────────────
+
+    def delete_user(self, user_id: int, email: str) -> Dict[str, int]:
+        """Permanently delete an account and every row of personal data.
+
+        Personal data lives in three places. ``user_data`` has an
+        ``ON DELETE CASCADE`` foreign key and goes with the user row.
+        ``backtest_jobs`` does NOT — it is keyed by ``user_email`` with no
+        foreign key — so a bare ``DELETE FROM users`` would leave the
+        account's queries and results behind. Both deletes run in one
+        transaction: either the account and all of its data are gone, or
+        nothing is.
+
+        Args:
+            user_id: The user's database id.
+            email: The account email (``backtest_jobs`` is keyed by it).
+
+        Returns:
+            Row counts: ``{"users": n, "backtest_jobs": n}``.
+        """
+        with self._get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM backtest_jobs WHERE user_email = %s", (email,))
+                    jobs = cur.rowcount
+                    cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                    users = cur.rowcount
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        logger.info("Deleted user %d (%d backtest jobs)", user_id, jobs)
+        return {"users": users, "backtest_jobs": jobs}
+
     # ── Per-user saved data (watchlist / screeners / backtests) ────────
 
     def get_user_data(self, user_id: int) -> Optional[Dict[str, Any]]:

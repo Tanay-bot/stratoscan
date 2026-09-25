@@ -280,6 +280,28 @@ def send_password_changed_email(to_email: str) -> bool:
     return send_email(to_email, subject, text, html_body=html)
 
 
+def send_account_deleted_email(to_email: str) -> bool:
+    """Confirm to the (former) owner that the account and its data are gone.
+
+    Returns:
+        True if the transport accepted the mail, False otherwise.
+    """
+    subject = "Your Stratoscan account has been deleted"
+    text = (
+        "Your Stratoscan account and its saved data — watchlist, saved screens "
+        "and backtest history — have been permanently deleted.\n\n"
+        "If you didn't do this, someone had your password. Your data cannot be "
+        "recovered, but you can reply to this email to let us know.\n"
+    )
+    html = (
+        "<p>Your Stratoscan account and its saved data — watchlist, saved screens "
+        "and backtest history — have been permanently deleted.</p>"
+        "<p>If you didn't do this, someone had your password. Your data cannot be "
+        "recovered, but you can reply to this email to let us know.</p>"
+    )
+    return send_email(to_email, subject, text, html_body=html)
+
+
 def _send_via_smtp(
     to_email: str,
     subject: str,

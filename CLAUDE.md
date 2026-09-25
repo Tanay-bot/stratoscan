@@ -316,6 +316,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/auth/password-reset/request` | — | email a single-use link; identical response + timing for unknown addresses |
 | POST | `/auth/password-reset/confirm` | — | set password, verify email, revoke all sessions |
 | POST | `/auth/change-password` | Bearer | revoke other sessions; returns a fresh token (wrong current pw = 400, never 401) |
+| POST | `/auth/delete-account` | Bearer | password re-entry; deletes user + `user_data` (cascade) + `backtest_jobs` (no FK — explicit) in one tx |
 | POST | `/screen` | — | NL query → ranked, paginated stocks (60s cache) |
 | POST | `/interpret` | — | debug: NL query → filters only |
 | POST | `/backtest` | Bearer | full backtest (20-min frontend timeout) |
