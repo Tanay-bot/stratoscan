@@ -78,6 +78,16 @@ ps:
 #   - It spends real rate-limit budget (`register`: 3/min, 10/day — CLAUDE.md
 #     §10). A 429 means wait, or `make down` to reset the Redis counters.
 #     Raising that cap to make this pass would defeat the reason it exists.
+#
+# The alert check proves the EMAIL alert channel end to end, for the same reason
+# "alerts_enabled is True" and "an alert arrived" are different claims. Two traps:
+#
+#   - send_alert hands off to a DAEMON thread and returns True BEFORE delivery
+#     (its docstring says so). A `python -c` that calls it and exits kills the
+#     dispatch mid-flight and delivers nothing — while reporting success. The
+#     thread is joined by name before the process exits.
+#   - The title carries a per-run token. A FIXED subject would let an earlier
+#     run's alert satisfy the match, exactly as a fixed address would above.
 verify:
 	@echo "── /health ──────────────────────────────────────────────"
 	@body=$$(curl -fsS http://localhost:8000/health); \
@@ -108,3 +118,17 @@ verify:
 			| python3 -c "import json,sys; a=sys.argv[1]; ms=json.load(sys.stdin).get('messages',[]); sys.exit(0 if any(a in str(m) and 'verify-email?token=' in str(m) for m in ms) else 1)" "$$addr" \
 			|| { echo "  ✗ no verification mail for $$addr in mailpit (address alone is not enough)"; exit 1; }; \
 		echo "  ✓ register → $$addr → mailpit, carrying a verify-email?token= link"
+	@echo
+	@echo "── an alert is actually delivered over SMTP ────────────"
+	@tok="alert-$$(date +%s)"; \
+		$(COMPOSE) exec -T api python -c "import sys, threading; from src.alerts import send_alert; ok = send_alert('stratoscan drill ' + sys.argv[1], 'local stack verify', level='error', throttle_key=sys.argv[1]); [t.join(timeout=15) for t in threading.enumerate() if t.name == 'alert-dispatch']; sys.exit(0 if ok else 1)" "$$tok" \
+			|| { echo "  ✗ send_alert returned False (no email channel configured, or throttled)"; exit 1; }; \
+		found=; \
+		for i in $$(seq 1 10); do \
+			curl -fsS --max-time 10 http://localhost:8025/api/v1/messages 2>/dev/null \
+				| python3 -c "import json,sys; tok=sys.argv[1]; ms=json.load(sys.stdin).get('messages',[]); sys.exit(0 if any(tok in str(m) and 'STRATOSCAN' in str(m) for m in ms) else 1)" "$$tok" \
+				&& { found=1; break; }; \
+			sleep 1; \
+		done; \
+		test -n "$$found" || { echo "  ✗ no alert carrying $$tok in mailpit"; exit 1; }; \
+		echo "  ✓ alert delivered → mailpit, carrying $$tok"

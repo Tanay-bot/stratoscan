@@ -78,8 +78,9 @@ def _dispatch_webhook(title: str, message: str, level: str) -> None:
 def _dispatch_email(title: str, message: str, level: str) -> None:
     """Send the alert through the existing SendGrid client (blocking).
 
-    Reuses ``src.emails.send_email`` — the same stdlib-only SendGrid client
-    that handles verification mail — so alerts need no new dependency and
+    Reuses ``src.emails.send_email`` — the same stdlib-only mail sender
+    that handles verification mail (SendGrid API or SMTP, per ``SMTP_HOST``)
+    — so alerts need no new dependency and
     only a recipient (``ALERT_EMAIL``) on top of the already-configured
     ``SENDGRID_API_KEY`` + ``EMAIL_FROM_ADDRESS``.
     """

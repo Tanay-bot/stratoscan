@@ -35,6 +35,7 @@ os.environ["SENDGRID_API_KEY"] = "SG.testkey123"
 os.environ["EMAIL_FROM_ADDRESS"] = "noreply@stratoscan.app"
 
 from src.config import settings  # noqa: E402
+from src import emails as emails_mod  # noqa: E402
 from src.emails import MAIL_TIMEOUT, SENDGRID_MAIL_URL, send_email  # noqa: E402
 
 SENDGRID_KEY = "SG.testkey123"
@@ -225,6 +226,22 @@ with _smtp() as (smtp_mock, _):
     assert send_email("a@b.test\nBcc: x@y.test", "s", "b") is False
     smtp_mock.assert_not_called()  # never got as far as a connection
 print("✅ header-injection attempt → False, no connection, no exception")
+
+# The return value is not the whole contract: the recipient also reaches the LOG,
+# and `to_email` is attacker-controlled (RegisterRequest.email is a bare str with
+# no format validation). Formatted with %s a raw newline forges log lines under
+# LOG_FORMAT=text; %r escapes it inside quotes. Assert on the RENDERED record —
+# the call args still hold the original unescaped value, which is why inspecting
+# them alone would prove nothing.
+with mock.patch.object(emails_mod.logger, "warning") as log_warning:
+    with _smtp():
+        assert send_email("a@b.test\nBcc: x@y.test", "s", "b") is False
+log_warning.assert_called_once()
+_fmt, *_fmt_args = log_warning.call_args.args
+_rendered = _fmt % tuple(_fmt_args)
+assert "\n" not in _rendered, f"raw newline written to the log record: {_rendered!r}"
+assert "\\n" in _rendered, f"expected an escaped newline: {_rendered!r}"
+print("✅ a linefeed in the recipient is escaped in the log record, never written raw")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
