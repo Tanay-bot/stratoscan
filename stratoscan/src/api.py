@@ -1408,7 +1408,7 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
         return "bearer"
     if path in (
         "/auth/me", "/auth/resend-verification", "/auth/logout-all",
-        "/auth/change-password", "/auth/delete-account",
+        "/auth/change-password", "/auth/delete-account", "/auth/refresh",
     ) or path.startswith("/me/"):
         return "bearer"
     return "none"
@@ -2415,6 +2415,52 @@ async def change_password(
         "token_type": "bearer",
         "expires_in": settings.jwt_expire_hours * 3600,
         "message": "Password changed. Every other device has been signed out.",
+    }
+
+
+@app.post(
+    "/auth/refresh",
+    response_model=Dict[str, Any],
+    summary="Re-issue the current token with a fresh expiry (sliding session)",
+    tags=["Auth"],
+)
+async def refresh_token(
+    request: Request,
+    response: Response,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Extend an active session without asking for the password again.
+
+    Ends the hard logout that dumped users mid-backtest when a 7-day token
+    lapsed. Three properties keep it from weakening anything:
+
+    - It requires a token that is valid **right now** (``get_current_user``),
+      including the ``token_version`` check — so a refresh can never outlive
+      a revocation, a reset or a password change.
+    - The new token carries the same ``ver``: refreshing is not a way to
+      escape "log out everywhere".
+    - ``auth_time`` is carried over, not reset, and a session older than
+      ``SESSION_MAX_AGE_DAYS`` since the last password entry is refused. A
+      stolen token can be ridden for at most that long, not forever.
+    """
+    from src.auth import _extract_bearer_token, create_access_token, verify_access_token
+
+    payload = verify_access_token(_extract_bearer_token(request) or "") or {}
+    # Tokens minted before auth_time existed fall back to iat.
+    auth_time = int(payload.get("auth_time") or payload.get("iat") or 0)
+    if time.time() - auth_time > settings.session_max_age_days * 86400:
+        raise HTTPException(
+            status_code=401,
+            detail="Your session is too old to extend. Log in again.",
+        )
+    token = create_access_token(
+        int(user["id"]), user["email"], int(user.get("token_version", 0)), auth_time
+    )
+    return {
+        "error": False,
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": settings.jwt_expire_hours * 3600,
     }
 
 

@@ -208,6 +208,10 @@ class Settings(BaseSettings):
     # long enough to find the email, short enough that a link sitting in an
     # inbox for a day is dead.
     password_reset_token_ttl_minutes: int = 45
+    # Sliding sessions: POST /auth/refresh re-issues a token while the user is
+    # active, but never beyond this many days after they last entered a
+    # password. Without a cap, a stolen token could be refreshed forever.
+    session_max_age_days: int = 30
 
     # ── Email verification (SendGrid Web API) ─────────────────────────
     # Signup verification: every new account gets an emailed verification

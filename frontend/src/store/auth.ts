@@ -15,6 +15,10 @@ const USER_KEY = 'stratoscan_user'
 // Single source of truth: the expiry key lives in client.ts (token storage).
 const EXPIRES_KEY = TOKEN_EXPIRES_KEY
 
+/** Renew the token once it is within this window of its deadline. */
+export const REFRESH_WHEN_WITHIN_MS = 2 * 24 * 60 * 60 * 1000
+let refreshInFlight = false
+
 interface AuthState {
   user: UserOut | null
   token: string | null
@@ -24,6 +28,7 @@ interface AuthState {
   logout: () => void
   bootstrap: () => Promise<void>
   setSession: (res: AuthResponse) => UserOut
+  refreshIfStale: () => Promise<void>
 }
 
 function readStoredUser(): UserOut | null {
@@ -74,6 +79,29 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ token: null, user: null, bootstrapped: true })
   },
 
+  refreshIfStale: async () => {
+    // Sliding session: while the user is active, renew a token that is close
+    // to its deadline so a long working session never ends in a hard logout.
+    // The server refuses to extend a sign-in older than SESSION_MAX_AGE_DAYS,
+    // and any failure here is silent — the normal expiry path still applies.
+    if (DEMO_MODE || !get().token || refreshInFlight) return
+    const expRaw = window.localStorage.getItem(EXPIRES_KEY)
+    const expiresAt = expRaw ? Number(expRaw) : NaN
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return
+    if (expiresAt - Date.now() > REFRESH_WHEN_WITHIN_MS) return
+    refreshInFlight = true
+    try {
+      const res = await services.refreshSession()
+      setToken(res.access_token)
+      window.localStorage.setItem(EXPIRES_KEY, String(Date.now() + res.expires_in * 1000))
+      set({ token: res.access_token })
+    } catch {
+      // Refused (too old / revoked) or offline: leave the session as it is.
+    } finally {
+      refreshInFlight = false
+    }
+  },
+
   bootstrap: async () => {
     // In demo mode a stored user is trusted; otherwise re-validate with /auth/me.
     if (get().bootstrapped) return
@@ -93,6 +121,7 @@ export const useAuth = create<AuthState>((set, get) => ({
           set({ user, bootstrapped: true })
           // Refresh the user's server-synced personal data on cold start.
           void usePersonal.getState().hydrateFromServer()
+          void get().refreshIfStale()
           return
         } catch {
           get().logout()
@@ -127,6 +156,16 @@ if (typeof window !== 'undefined') {
       window.location.assign('/login')
     }
   })
+
+  // Activity-driven renewal: coming back to the tab, and a slow heartbeat
+  // while it stays visible. Cheap — refreshIfStale is a no-op until the
+  // token is inside its renewal window.
+  const renew = () => {
+    if (document.visibilityState === 'visible') void useAuth.getState().refreshIfStale()
+  }
+  window.addEventListener('focus', renew)
+  document.addEventListener('visibilitychange', renew)
+  window.setInterval(renew, 30 * 60 * 1000)
 
   // Multi-tab session sync: logging out (or in) in ANY tab updates every
   // other tab instantly via the localStorage `storage` event — no more stale

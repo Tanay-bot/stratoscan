@@ -89,6 +89,10 @@ const AUTH_PATHS = [
   '/auth/register',
   '/auth/verify-email',
   '/auth/resend-verification',
+  // A refused refresh (session past its maximum age) is not an expired
+  // session: the current token still works until its own deadline, and the
+  // normal expiry path handles that. Never auto-logout on it.
+  '/auth/refresh',
 ]
 
 api.interceptors.response.use(

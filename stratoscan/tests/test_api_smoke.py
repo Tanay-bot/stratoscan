@@ -46,7 +46,7 @@ expected = {
     "/auth/register", "/auth/login", "/auth/me",
     "/auth/verify-email", "/auth/resend-verification", "/auth/logout-all",
     "/auth/password-reset/request", "/auth/password-reset/confirm",
-    "/auth/change-password", "/auth/delete-account",
+    "/auth/change-password", "/auth/delete-account", "/auth/refresh",
     "/me/personal",
     "/ops/jobs", "/ops/jobs/{job_name}",
     "/admin", "/admin/overview", "/admin/users", "/admin/users/{user_id}", "/admin/jobs",

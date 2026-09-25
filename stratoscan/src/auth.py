@@ -143,7 +143,9 @@ def hash_reset_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_access_token(user_id: int, email: str, token_version: int = 0) -> str:
+def create_access_token(
+    user_id: int, email: str, token_version: int = 0, auth_time: Optional[int] = None
+) -> str:
     """Create a signed JWT (HS256) for a user.
 
     Args:
@@ -153,6 +155,10 @@ def create_access_token(user_id: int, email: str, token_version: int = 0) -> str
             as the ``ver`` claim. ``get_current_user`` rejects a token whose
             ``ver`` does not match the row, which is what makes a bump of
             that column revoke every token the account has issued.
+        auth_time: When the user last proved who they are (password or reset
+            link), stamped as ``auth_time``. A fresh login passes None (= now);
+            ``POST /auth/refresh`` passes the original through, which is what
+            lets it cap how long one sign-in can be extended.
 
     Returns:
         A three-part ``header.payload.signature`` token string.
@@ -164,6 +170,7 @@ def create_access_token(user_id: int, email: str, token_version: int = 0) -> str
         "email": email,
         "ver": token_version,
         "iat": now,
+        "auth_time": auth_time if auth_time is not None else now,
         _TOKEN_TTL: now + settings.jwt_expire_hours * 3600,
     }
     header_b64 = _b64url_encode(json.dumps(header).encode("utf-8"))

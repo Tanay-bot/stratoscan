@@ -30,7 +30,7 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 | Auth level | Meaning | Endpoints |
 |---|---|---|
 | `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email` |
-| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/me/personal` |
+| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -266,6 +266,7 @@ user's watchlist and saved screeners follow them across devices.
 | POST | `/auth/password-reset/confirm` | none | `{token, new_password}` | `{error: false, message}`; 400 invalid/used/expired, 422 weak password |
 | POST | `/auth/change-password` | bearer | `{current_password, new_password}` | `{error: false, access_token, token_type, expires_in, message}` |
 | POST | `/auth/delete-account` | bearer | `{password}` | `{error: false, message}` — permanent; wrong password is 400 |
+| POST | `/auth/refresh` | bearer | — | `{error: false, access_token, token_type, expires_in}`; 401 once the sign-in is older than `SESSION_MAX_AGE_DAYS` (30) |
 
 Register/login return the same shape: `{access_token, token_type, expires_in, user, email_sent}`.
 
@@ -292,16 +293,20 @@ device that made the change.
 A wrong password on `/auth/change-password` or `/auth/delete-account` is **400, not 401** —
 deliberately, so a typo does not trip the 401 auto-logout.
 
-### Silent refresh — NOT implemented
+### Sliding sessions — `POST /auth/refresh`
 
-The backend has no `POST /auth/refresh` route (confirmed by the OpenAPI spec
-and the live `/meta` endpoint catalog), so the frontend does not implement
-silent token rotation. JWTs live 7 days (`jwt_expire_hours: 168`) and then
-expire; the client detects the resulting 401 and clears the session with a
-redirect to `/login` (see §2). Client token storage
-(`stratoscan_token` / `stratoscan_token_expires_at`) already persists the
-absolute expiry so a stale token is never trusted after its deadline — a
-refresh endpoint can be added later without a coordinated release.
+The client renews its token while the user is active (tab focus, and a
+30-minute heartbeat while visible) once it is within 2 days of its deadline
+(`store/auth.ts: refreshIfStale`). A refresh:
+
+- requires a token valid **now**, including `token_version` — it can never
+  revive a revoked session;
+- keeps the same `ver`, so "log out everywhere" still ends it;
+- carries `auth_time` (last password entry) through unchanged, and is refused
+  with 401 once that is older than `SESSION_MAX_AGE_DAYS` (default 30). The
+  existing token keeps working until its own `exp`; the client ignores the
+  refusal (`/auth/refresh` is in the 401 allowlist) and the normal expiry
+  path takes over. So one sign-in lasts at most ~37 days, not forever.
 
 ---
 

@@ -599,6 +599,30 @@
         }
       }
     },
+    "/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Re-issue the current token with a fresh expiry (sliding session)",
+        "description": "Extend an active session without asking for the password again.\n\nEnds the hard logout that dumped users mid-backtest when a 7-day token\nlapsed. Three properties keep it from weakening anything:\n\n- It requires a token that is valid **right now** (``get_current_user``),\n  including the ``token_version`` check \u2014 so a refresh can never outlive\n  a revocation, a reset or a password change.\n- The new token carries the same ``ver``: refreshing is not a way to\n  escape \"log out everywhere\".\n- ``auth_time`` is carried over, not reset, and a session older than\n  ``SESSION_MAX_AGE_DAYS`` since the last password entry is refused. A\n  stolen token can be ridden for at most that long, not forever.",
+        "operationId": "refresh_token_auth_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Refresh Token Auth Refresh Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/delete-account": {
       "post": {
         "tags": [

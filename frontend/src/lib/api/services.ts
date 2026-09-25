@@ -202,6 +202,17 @@ export async function deleteAccount(password: string): Promise<MessageResponse> 
   return unwrap<MessageResponse>(api.post('/auth/delete-account', { password }))
 }
 
+export interface RefreshResponse {
+  access_token: string
+  token_type: string
+  expires_in: number
+}
+
+/** Re-issues the current token with a fresh expiry (sliding session). */
+export async function refreshSession(): Promise<RefreshResponse> {
+  return unwrap<RefreshResponse>(api.post('/auth/refresh'))
+}
+
 // ── Screener ────────────────────────────────────────────────────────────────
 
 export async function screen(req: ScreenRequest): Promise<ScreenResponse> {
