@@ -95,14 +95,17 @@ services:
       start_period: 2s
 
   # ── Mail catcher ────────────────────────────────────────────────────────────
-  # SMTP on 1025, web UI on 8025.
+  # SMTP on 1025, web UI on 8025, REST API on 8025/api/v1/messages.
   #
-  # ⚠️  KNOWN GAP: the app mails through SendGrid's HTTP API
-  # (`POST https://api.sendgrid.com/v3/mail/send`, hardcoded in src/emails.py)
-  # and has NO SMTP path, so verification emails will NOT land here today. The
-  # service is in the stack so the arrangement is complete and the day
-  # src/emails.py grows an SMTP sender, nothing else has to change. Wiring it
-  # would mean editing src/, which task 005's non-goals forbid.
+  # The app really mails into this. src/emails.py sends over SMTP whenever
+  # SMTP_HOST is set (".env.local" points it here), so registering a local
+  # account produces a genuine verification email with a working token — the
+  # one signup flow that is otherwise impossible to exercise without a SendGrid
+  # account. `make verify` registers a throwaway account and reads the message
+  # back out of mailpit's API, so "mail works" is asserted, not assumed.
+  #
+  # SendGrid remains the production transport; this exists to make the local
+  # arrangement match production, not to replace it.
   mailpit:
     image: axllent/mailpit
     ports:

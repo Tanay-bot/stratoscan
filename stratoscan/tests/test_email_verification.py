@@ -149,6 +149,7 @@ print("✅ HTTP 403 → False (sender not verified case)")
 # 3c. Unconfigured key → False, no network attempt.
 with mock.patch("src.emails.settings") as ms:
     ms.sendgrid_api_key = ""
+    ms.smtp_host = ""          # keep this case on the SendGrid path
     ms.email_from_address = "noreply@stratoscan.app"
     with mock.patch("urllib.request.urlopen", side_effect=AssertionError("no network!")):
         assert send_email("x@y.z", "s", "b") is False

@@ -66,6 +66,18 @@ ps:
 # but python:3.14-slim ships no procps (so there is no `ps`), and installing it
 # would mean editing the Dockerfile — which that spec forbids. PID 1's
 # /proc/1/cmdline answers the same question more directly, so it is used instead.
+#
+# The mail check proves the SMTP transport end to end: "the mailpit container is
+# up" says nothing about whether the app can deliver into it, so it registers a
+# throwaway account and reads the message back out of mailpit's REST API. Two
+# traps:
+#
+#   - The address carries a timestamp: /auth/register 409s a duplicate email, so
+#     a FIXED address would break this target on its second run AND let an
+#     earlier run's message satisfy the match.
+#   - It spends real rate-limit budget (`register`: 3/min, 10/day — CLAUDE.md
+#     §10). A 429 means wait, or `make down` to reset the Redis counters.
+#     Raising that cap to make this pass would defeat the reason it exists.
 verify:
 	@echo "── /health ──────────────────────────────────────────────"
 	@body=$$(curl -fsS http://localhost:8000/health); \
@@ -84,5 +96,15 @@ verify:
 		echo "$$log" | grep -m1 "Upstash Redis backend" || { echo "  ✗ no 'Upstash Redis backend' line — Redis is not in use"; exit 1; }; \
 		if echo "$$log" | grep -qE "falling back to the in-memory|in-memory store"; then echo "  ✗ fell back to the in-memory store"; exit 1; fi
 	@echo
-	@echo "── mailpit ──────────────────────────────────────────────"
-	@curl -fsS http://localhost:8025 >/dev/null && echo "  ✓ mailpit up (nothing will arrive in it — see .env.local.example)"
+	@echo "── a real verification mail reaches mailpit (not just that it is up) ──"
+	@addr="smtp-check-$$(date +%s)@example.test"; \
+		curl -fsS -X POST http://localhost:8000/auth/register \
+			-H 'Content-Type: application/json' \
+			--max-time 20 \
+			-d "{\"email\":\"$$addr\",\"password\":\"local-dev-password\"}" \
+			| python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('email_sent') else 1)" \
+			|| { echo "  ✗ register did not report email_sent=true"; exit 1; }; \
+		curl -fsS --max-time 10 http://localhost:8025/api/v1/messages \
+			| python3 -c "import json,sys; a=sys.argv[1]; ms=json.load(sys.stdin).get('messages',[]); sys.exit(0 if any(a in str(m) and 'verify-email?token=' in str(m) for m in ms) else 1)" "$$addr" \
+			|| { echo "  ✗ no verification mail for $$addr in mailpit (address alone is not enough)"; exit 1; }; \
+		echo "  ✓ register → $$addr → mailpit, carrying a verify-email?token= link"
