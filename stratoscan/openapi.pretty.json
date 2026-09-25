@@ -443,6 +443,30 @@
         }
       }
     },
+    "/auth/logout-all": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Revoke every token this account has issued",
+        "description": "Log out everywhere: invalidate every JWT this account holds.\n\nBumps ``users.token_version``, which ``get_current_user`` compares\nagainst the ``ver`` claim of every token on every authenticated\nrequest. The caller's own token is therefore dead as soon as this\nreturns \u2014 that is the point (a stolen laptop, a leaked token), and the\nfrontend's 401 handler turns it into a normal logout. Log in again to\nmint a token carrying the new version.",
+        "operationId": "logout_all_auth_logout_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Logout All Auth Logout All Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/screen": {
       "post": {
         "tags": [

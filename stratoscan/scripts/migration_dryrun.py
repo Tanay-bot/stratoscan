@@ -9,14 +9,14 @@ against a throwaway scratch copy (schema + data cloned from production) and
 proves, before the push:
 
   1. The upgrade completes without errors.
-  2. The head revision is stamped (``b4c5d6e7f8a9`` today).
+  2. The head revision is stamped (``c1d2e3f4a5b6`` today).
   3. Every expected table + column exists after the upgrade.
   4. No data is lost: row counts AND a per-table checksum are identical
      before vs after (checksum = sum of numeric columns + count + md5 of a
      text sample, computed per table).
 
 It also tests the REAL production scenario: prod currently sits at
-``d5e6f7a8b9c0`` (six revisions behind head) and its job-monitor tables were
+``d5e6f7a8b9c0`` (well behind head) and its job-monitor tables were
 created by the runtime init_schema without alembic recording them — so the
 dry-run verifies idempotent migrations replay cleanly over already-existing
 tables.
@@ -56,7 +56,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HERE)
 
-HEAD_REVISION = "b4c5d6e7f8a9"  # must stay in sync with alembic/versions/ head
+HEAD_REVISION = "c1d2e3f4a5b6"  # must stay in sync with alembic/versions/ head
 
 # Expected tables after ``alembic upgrade head`` (runtime + migration DDL).
 EXPECTED_TABLES = {
