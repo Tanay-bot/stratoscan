@@ -122,6 +122,77 @@ export async function resendVerification(): Promise<{ email_sent: boolean; messa
   return unwrap<{ email_sent: boolean; message: string }>(api.post('/auth/resend-verification'))
 }
 
+// ── Password & sessions ────────────────────────────────────────────────────
+
+export interface MessageResponse {
+  error: boolean
+  message: string
+}
+
+export interface ChangePasswordResponse extends MessageResponse {
+  access_token: string
+  token_type: string
+  expires_in: number
+}
+
+/** Always resolves with the same message whether or not the account exists. */
+export async function requestPasswordReset(email: string): Promise<MessageResponse> {
+  if (DEMO_MODE) {
+    await delay(350)
+    return {
+      error: false,
+      message:
+        "If an account exists for that address, we've sent a link to reset its password. It expires soon, so check your inbox now.",
+    }
+  }
+  return unwrap<MessageResponse>(api.post('/auth/password-reset/request', { email }))
+}
+
+export async function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<MessageResponse> {
+  if (DEMO_MODE) {
+    await delay(300)
+    return { error: false, message: 'Your password has been reset. Log in with your new password.' }
+  }
+  return unwrap<MessageResponse>(
+    api.post('/auth/password-reset/confirm', { token, new_password: newPassword }),
+  )
+}
+
+/** Returns a fresh token: the old one is revoked, even on this device. */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<ChangePasswordResponse> {
+  if (DEMO_MODE) {
+    await delay(300)
+    return {
+      error: false,
+      message: 'Password changed. Every other device has been signed out.',
+      access_token: 'demo-token',
+      token_type: 'bearer',
+      expires_in: 604800,
+    }
+  }
+  return unwrap<ChangePasswordResponse>(
+    api.post('/auth/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  )
+}
+
+/** Revokes every token the account holds — including this one. */
+export async function logoutEverywhere(): Promise<MessageResponse> {
+  if (DEMO_MODE) {
+    await delay(250)
+    return { error: false, message: 'All sessions are logged out.' }
+  }
+  return unwrap<MessageResponse>(api.post('/auth/logout-all'))
+}
+
 // ── Screener ────────────────────────────────────────────────────────────────
 
 export async function screen(req: ScreenRequest): Promise<ScreenResponse> {

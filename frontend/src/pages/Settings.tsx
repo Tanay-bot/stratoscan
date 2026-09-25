@@ -1,7 +1,18 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Mail, ShieldCheck, Sparkles, User as UserIcon } from 'lucide-react'
+import {
+  KeyRound,
+  LogOut,
+  Mail,
+  MonitorX,
+  ShieldCheck,
+  Sparkles,
+  User as UserIcon,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { fieldLabel } from '@/components/AuthShell'
+import { changePassword, logoutEverywhere } from '@/lib/api/services'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/store/auth'
@@ -15,6 +26,137 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <span className="text-sm text-text-mid">{label}</span>
       {children}
     </div>
+  )
+}
+
+function SecuritySection() {
+  const { user, setSession, logout } = useAuth()
+  const navigate = useNavigate()
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [revoking, setRevoking] = useState(false)
+
+  const onChange = async (e: FormEvent) => {
+    e.preventDefault()
+    if (next.length < 8) return setError('New password must be at least 8 characters')
+    if (next !== confirm) return setError('New passwords do not match')
+    setError(null)
+    setSaving(true)
+    try {
+      const res = await changePassword(current, next)
+      // The old token is revoked server-side — including on this device — so
+      // the returned one must replace it or the next request would 401.
+      if (user) {
+        setSession({
+          access_token: res.access_token,
+          token_type: res.token_type,
+          expires_in: res.expires_in,
+          email_sent: false,
+          user,
+        })
+      }
+      setCurrent('')
+      setNext('')
+      setConfirm('')
+      toast.success('Password changed', res.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change your password.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onRevokeAll = async () => {
+    setRevoking(true)
+    try {
+      await logoutEverywhere()
+      logout()
+      toast.info('Signed out everywhere', 'Every device, including this one, has been signed out.')
+      navigate('/login')
+    } catch (err) {
+      toast.error(
+        'Sign out everywhere',
+        err instanceof Error ? err.message : 'Could not sign out other devices right now.',
+      )
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  return (
+    <section className="glass rounded-2xl p-6" aria-label="Security">
+      <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
+        <KeyRound className="h-4 w-4 text-neon" aria-hidden="true" /> Password &amp; sessions
+      </h2>
+      <p className="text-sm text-text-mid">Changing your password signs out every other device.</p>
+      <form
+        className="mt-4 grid gap-3 sm:grid-cols-3"
+        onSubmit={(e) => void onChange(e)}
+        noValidate
+      >
+        <div className="space-y-1.5">
+          <label htmlFor="current-password" className={fieldLabel}>
+            Current
+          </label>
+          <Input
+            id="current-password"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="new-password" className={fieldLabel}>
+            New
+          </label>
+          <Input
+            id="new-password"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label htmlFor="confirm-new-password" className={fieldLabel}>
+            Confirm new
+          </label>
+          <Input
+            id="confirm-new-password"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+        </div>
+        {error && (
+          <p role="alert" className="text-xs text-loss-soft sm:col-span-3">
+            {error}
+          </p>
+        )}
+        <div className="sm:col-span-3">
+          <Button type="submit" loading={saving} disabled={!current || !next}>
+            Change password
+          </Button>
+        </div>
+      </form>
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-5">
+        <div>
+          <p className="text-sm font-medium text-text-hi">Sign out everywhere</p>
+          <p className="text-xs text-text-mid">
+            Lost a device, or signed in somewhere you shouldn&apos;t have? End every session now.
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => void onRevokeAll()} loading={revoking}>
+          <MonitorX className="h-4 w-4" aria-hidden="true" /> Sign out everywhere
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -67,6 +209,8 @@ export function Settings() {
           </Button>
         </div>
       </section>
+
+      {!DEMO_MODE && <SecuritySection />}
 
       {/* Notifications */}
       <section className="glass rounded-2xl p-6" aria-label="Notifications">

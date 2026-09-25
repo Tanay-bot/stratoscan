@@ -32,6 +32,12 @@ const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m
 const VerifyEmail = lazy(() =>
   import('@/pages/VerifyEmail').then((m) => ({ default: m.VerifyEmail })),
 )
+const ForgotPassword = lazy(() =>
+  import('@/pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })),
+)
+const ResetPassword = lazy(() =>
+  import('@/pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
+)
 const NotFound = lazy(() => import('@/pages/NotFound').then((m) => ({ default: m.NotFound })))
 
 /** Global keyboard shortcuts (Cmd/Ctrl+K search, Cmd/Ctrl+/ help, Esc, Cmd+Enter). */
@@ -89,6 +95,8 @@ export default function App() {
             <Route path="/login" element={<Auth mode="login" />} />
             <Route path="/signup" element={<Auth mode="signup" />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* Protected app */}
             <Route

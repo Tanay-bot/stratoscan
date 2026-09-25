@@ -173,12 +173,22 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
               </div>
 
               <div className="space-y-1.5">
-                <label
-                  htmlFor="password"
-                  className="text-2xs font-semibold uppercase tracking-wider text-text-low"
-                >
-                  Password
-                </label>
+                <div className="flex items-baseline justify-between">
+                  <label
+                    htmlFor="password"
+                    className="text-2xs font-semibold uppercase tracking-wider text-text-low"
+                  >
+                    Password
+                  </label>
+                  {isLogin && (
+                    <Link
+                      to="/forgot-password"
+                      className="text-2xs text-text-mid transition-colors hover:text-neon"
+                    >
+                      Forgot password?
+                    </Link>
+                  )}
+                </div>
                 <Input
                   id="password"
                   type="password"
