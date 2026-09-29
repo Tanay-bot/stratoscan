@@ -47,6 +47,7 @@ expected = {
     "/auth/verify-email", "/auth/resend-verification", "/auth/logout-all",
     "/auth/password-reset/request", "/auth/password-reset/confirm",
     "/auth/change-password", "/auth/delete-account", "/auth/refresh",
+    "/auth/google/start", "/auth/google/callback",
     "/me/personal",
     "/ops/jobs", "/ops/jobs/{job_name}",
     "/admin", "/admin/overview", "/admin/users", "/admin/users/{user_id}", "/admin/jobs",

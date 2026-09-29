@@ -13,16 +13,25 @@ import { ApiError } from './types'
 export const API_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 /**
+ * Origin of the backend itself, resolved once so every consumer agrees on it.
+ *
+ * Absolute VITE_API_URL in prod/staging; the documented dev backend
+ * (http://localhost:8000) when the relative `/api` proxy is in use — the proxy
+ * only works for axios calls, and some links must be real browser navigations
+ * to the API (the admin dashboard below, and "Continue with Google", which has
+ * to reach the API's own /auth/google/start rather than fetch it).
+ */
+export const API_ORIGIN = (API_URL.startsWith('http') ? API_URL : 'http://localhost:8000').replace(
+  /\/+$/,
+  '',
+)
+
+/**
  * Origin of the backend admin dashboard — served by the API itself at
  * `/admin` as a self-contained HTML page (src/admin_dashboard.py), not a
- * frontend route. Resolves the API origin so the nav can link to it:
- * absolute VITE_API_URL in prod/staging; the documented dev backend
- * (http://localhost:8000) when the relative `/api` proxy is in use.
+ * frontend route.
  */
-export const ADMIN_DASHBOARD_URL = (() => {
-  const origin = API_URL.startsWith('http') ? API_URL : 'http://localhost:8000'
-  return `${origin.replace(/\/+$/, '')}/admin`
-})()
+export const ADMIN_DASHBOARD_URL = `${API_ORIGIN}/admin`
 
 /**
  * Demo mode serves realistic synthetic data through the same typed API

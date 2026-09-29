@@ -29,7 +29,7 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 
 | Auth level | Meaning | Endpoints |
 |---|---|---|
-| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email` |
+| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback` |
 | `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
@@ -267,6 +267,8 @@ user's watchlist and saved screeners follow them across devices.
 | POST | `/auth/change-password` | bearer | `{current_password, new_password}` | `{error: false, access_token, token_type, expires_in, message}` |
 | POST | `/auth/delete-account` | bearer | `{password}` | `{error: false, message}` — permanent; wrong password is 400 |
 | POST | `/auth/refresh` | bearer | — | `{error: false, access_token, token_type, expires_in}`; 401 once the sign-in is older than `SESSION_MAX_AGE_DAYS` (30) |
+| GET | `/auth/google/start` | none | — | **302** to Google's consent screen; sets the signed `g_oauth` state cookie |
+| GET | `/auth/google/callback` | none | `?code=&state=` | **302** to `{APP_BASE_URL}/auth/google/complete#token=…&expires_in=…`, or to `/login?oauth_error=<code>` |
 
 Register/login return the same shape: `{access_token, token_type, expires_in, user, email_sent}`.
 
@@ -292,6 +294,45 @@ device that made the change.
 
 A wrong password on `/auth/change-password` or `/auth/delete-account` is **400, not 401** —
 deliberately, so a typo does not trip the 401 auto-logout.
+
+### Continue with Google — `GET /auth/google/start` → `/auth/google/callback`
+
+Not JSON endpoints: both return **302s** for a plain `<a href>`. The link the
+frontend renders is `{API_ORIGIN}/auth/google/start` — a real browser
+navigation, not an axios call (the 302 to Google and the state cookie have to
+be handled by the browser). No endpoint accepts an ID token from the browser;
+the code exchange happens server-side.
+
+1. `/auth/google/start` → 302 to `accounts.google.com` with `state` + `nonce`,
+   and sets one `HttpOnly`, `SameSite=Lax`, `Path=/auth/google` cookie carrying
+   both, HMAC-signed. Unconfigured (`GOOGLE_CLIENT_ID`/`SECRET` blank) → 302 to
+   `/login?oauth_error=unavailable`.
+2. Google returns to `/auth/google/callback?code=…&state=…`. The cookie's
+   signature and `state` are verified first (CSRF); the code is exchanged
+   server-side; the ID token's `iss`/`aud`/`exp`/`nonce`/`email_verified` are
+   checked; then:
+   - the account with that Google `sub` signs in (even if the Google email
+     changed since);
+   - an **existing verified** account with that email is linked — its password
+     keeps working;
+   - an **existing unverified** account with that email is **taken over**: the
+     password is replaced with an unusable hash, pending tokens are cleared and
+     `token_version` is bumped, so whoever registered the address without
+     proving the inbox loses both the password and every live session;
+   - otherwise an account is created verified, with no usable password
+     (a Google-only user who wants one uses "Forgot password").
+3. Success redirects to `{APP_BASE_URL}/auth/google/complete#token=<jwt>&expires_in=<seconds>`.
+   **The token is in the fragment, never the query** — fragments are not sent
+   to servers, so it cannot reach an access log. The page
+   (`frontend/src/pages/GoogleComplete.tsx`) stores it, calls `/auth/me`,
+   starts the session and immediately strips the fragment from the URL.
+4. Every failure redirects to `{APP_BASE_URL}/login?oauth_error=<code>` where
+   `<code>` is one of `unavailable`, `state`, `exchange`, `token`, `unverified`,
+   `failed`. Map each to a sentence; never show the code itself.
+
+The flow needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI`
+(the last must match the Google console entry exactly). The state cookie is
+signed with `JWT_SECRET`, so Google sign-in also requires auth to be configured.
 
 ### Sliding sessions — `POST /auth/refresh`
 

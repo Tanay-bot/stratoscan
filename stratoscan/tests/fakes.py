@@ -96,6 +96,10 @@ class FakeUserDB:
             "token_version": 0,
             "reset_token_hash": None,
             "reset_token_expires": None,
+            # Google identity ("Continue with Google"). Real rows carry this
+            # key (NULL for email/password accounts) — the merge rule reads
+            # it, so the fake must have it too.
+            "google_sub": None,
             "created_at": "2026-07-31T00:00:00Z",
         }
         self._next_id += 1
@@ -230,6 +234,54 @@ class FakeUserDB:
                 user["token_version"] += 1
                 return user["token_version"]
         return 0
+
+    # ── Google OAuth ("Continue with Google") ─────────────────────────
+    # Same signatures and returns as PostgresDB, minus the SQL.
+
+    def get_user_by_google_sub(self, sub: str) -> Dict[str, Any] | None:
+        """Mirror PostgresDB.get_user_by_google_sub."""
+        for user in self._users.values():
+            if sub and user.get("google_sub") == sub:
+                return {
+                    "id": user["id"],
+                    "email": user["email"],
+                    "is_admin": user.get("is_admin", False),
+                    "token_version": user.get("token_version", 0),
+                }
+        return None
+
+    def link_google_identity(self, user_id: int, sub: str) -> None:
+        """Mirror PostgresDB.link_google_identity."""
+        for user in self._users.values():
+            if user["id"] == user_id:
+                user["google_sub"] = sub
+                return
+
+    def take_over_for_google(self, user_id: int, sub: str, unusable_hash: str) -> int:
+        """Mirror PostgresDB.take_over_for_google — including the point of it:
+        the password is replaced and every session is revoked."""
+        for user in self._users.values():
+            if user["id"] == user_id:
+                user["password_hash"] = unusable_hash
+                user["google_sub"] = sub
+                user["email_verified"] = True
+                user["verification_token"] = None
+                user["verification_token_expires"] = None
+                user["reset_token_hash"] = None
+                user["reset_token_expires"] = None
+                user["token_version"] += 1
+                return user["token_version"]
+        return 0
+
+    def create_google_user(self, email: str, sub: str, unusable_hash: str) -> int:
+        """Mirror PostgresDB.create_google_user (verified, no usable password)."""
+        if email in self._users:
+            raise ValueError(
+                'duplicate key value violates unique constraint "users_email_key"'
+            )
+        user = self._store(email, unusable_hash, "free", email_verified=True)
+        user["google_sub"] = sub
+        return user["id"]
 
     def delete_user(self, user_id: int, email: str) -> Dict[str, int]:
         """Mirror PostgresDB.delete_user (user_data goes with the user)."""
