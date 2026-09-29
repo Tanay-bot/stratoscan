@@ -1214,11 +1214,24 @@ class PostgresDB:
             "token_version = token_version + 1 "
             "WHERE id = %s RETURNING token_version"
         )
+        # The squatter's saved state goes too, in the same transaction: the
+        # real owner must not inherit a stranger's watchlist, saved screens or
+        # backtest history. backtest_jobs has no FK to users, hence explicit.
         with self._get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, (unusable_hash, sub, user_id))
-                row = cur.fetchone()
-            conn.commit()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (unusable_hash, sub, user_id))
+                    row = cur.fetchone()
+                    cur.execute("DELETE FROM user_data WHERE user_id = %s", (user_id,))
+                    cur.execute(
+                        "DELETE FROM backtest_jobs WHERE user_email = "
+                        "(SELECT email FROM users WHERE id = %s)",
+                        (user_id,),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
         new_version = int(row[0]) if row else 0
         logger.info(
             "Unverified account %d taken over by Google identity (token_version=%d)",

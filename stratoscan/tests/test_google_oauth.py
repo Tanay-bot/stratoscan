@@ -392,6 +392,9 @@ with _configured():
     row = fake_db.get_user_by_email(email)
     assert row["email_verified"] is False, "the squatter's inbox was never proved"
     assert _me(squatter_token).status_code == 200, "the squatter's session is live first"
+    planted = client.put("/me/personal", headers={"Authorization": f"Bearer {squatter_token}"},
+                         json={"watchlist": ["PLANTED"], "saved_screeners": [], "recent_backtests": []})
+    assert planted.status_code == 200, planted.text[:200]
 
     resp = _sign_in("google-sub-owner", email)
     assert resp.status_code == 302, f"{resp.status_code} {resp.text[:200]}"
@@ -412,7 +415,10 @@ with _configured():
     assert row["reset_token_hash"] is None, "pending tokens are cleared"
     # 4. The real owner is signed in.
     assert _me(owner_token).status_code == 200, "the Google token must work"
-print("✅ squatter: password 401, old token 401, row verified + google_sub, owner token 200")
+    # 5. Nothing the stranger saved is handed to the owner.
+    mine = client.get("/me/personal", headers={"Authorization": f"Bearer {owner_token}"}).json()
+    assert "PLANTED" not in mine.get("watchlist", []), mine
+print("✅ squatter: password 401, old token 401, row verified + google_sub, owner token 200, planted data gone")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

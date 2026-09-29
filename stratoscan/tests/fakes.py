@@ -270,6 +270,7 @@ class FakeUserDB:
                 user["reset_token_hash"] = None
                 user["reset_token_expires"] = None
                 user["token_version"] += 1
+                self._personal.pop(user_id, None)  # squatter's saved state goes
                 return user["token_version"]
         return 0
 
