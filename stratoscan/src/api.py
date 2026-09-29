@@ -1147,6 +1147,83 @@ def _build_screen_response(
     )
 
 
+# ── Analytics wiring (src/analytics.py) ────────────────────────────────────
+# One thin helper per shape of event, so every call site stays a single line and
+# each prop name is written down exactly once. All of them are fire-and-forget:
+# ``track()`` swallows its own failures by contract (analytics must never break
+# a screen or a signup), so none of these can raise into a handler.
+
+def _user_id_of(user: Optional[Dict[str, Any]]) -> Optional[int]:
+    """The id from a ``get_current_user`` dict, or None when absent/malformed."""
+    if not user:
+        return None
+    try:
+        return int(user.get("id"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _track_interpret(interpreted: Any) -> None:
+    """Record WHICH interpreter path served a query — the cost split.
+
+    Nothing is recorded when ``source`` is empty: that means the interpreter
+    never produced an interpretation (an empty query) or failed outright
+    (``error`` is set), and the request is aborting rather than screening.
+
+    No props: the deterministic path's confidence score lives only inside
+    ``src/deterministic_interpreter`` and is deliberately not threaded through
+    ``InterpretedQuery`` (the interpreter carries exactly one new field, its
+    ``source``). ``interpret_deterministic`` therefore accepts a
+    ``confidence`` key it does not currently receive.
+    """
+    source = getattr(interpreted, "source", "")
+    if source not in ("deterministic", "llm"):
+        return
+    from src.analytics import track
+
+    track("interpret_deterministic" if source == "deterministic" else "interpret_llm")
+
+
+def _track_screen_returned(response: Any) -> None:
+    """Record a screen the user was served — the two counters, nothing else.
+
+    Fires for a cache hit as well as a fresh run: the funnel counts screens
+    people SAW, and a repeat query inside the 60s cache TTL is still a screen.
+    Deliberately not the query text — that is user content.
+    """
+    from src.analytics import track
+
+    track(
+        "screen_returned",
+        props={
+            "result_count": len(getattr(response, "results", None) or []),
+            "total_matches": int(getattr(response, "total_matches", 0) or 0),
+        },
+    )
+
+
+def _backtest_symbol_count(payload: Any) -> int:
+    """How many symbols a run will test: explicit tickers, else ``top_n``."""
+    symbols = getattr(payload, "symbols", None)
+    if symbols:
+        return len(symbols)
+    return int(getattr(payload, "top_n", 0) or 0)
+
+
+def _backtest_failure_reason(exc: Exception) -> str:
+    """A short FIXED reason code for a failed backtest — never exception text.
+
+    Exception messages can carry user content, credentials or provider
+    payloads, so the funnel records one of a closed set of codes instead:
+    ``http_<status>`` for a deliberate HTTP failure, ``engine`` for anything
+    else. The real detail goes to the log (and to ``error_log``, scrubbed).
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return f"http_{status}"
+    return "engine"
+
+
 def _run_screen(query: str, limit: int, offset: int = 0,
                 sort_by: str = "market_cap", sort_desc: bool = True) -> tuple:
     """Run the full screening pipeline synchronously.
@@ -1165,6 +1242,7 @@ def _run_screen(query: str, limit: int, offset: int = 0,
     from src.screener import StockScreener
 
     interpreted = interpret_query(query)
+    _track_interpret(interpreted)
     screener = StockScreener()
     report = screener.screen(
         interpreted,
@@ -1739,6 +1817,10 @@ async def register(request: Request, response: Response, payload: RegisterReques
     is_admin = _bootstrap_admin_role(
         db, email, user_id, False, not settings.has_email_verification
     )
+
+    from src.analytics import track
+
+    track("signup_completed", user_id=user_id, props={"method": "password"})
 
     # A freshly created row is token_version 0 (the column default).
     token = create_access_token(user_id, email, 0)
@@ -2315,6 +2397,14 @@ async def google_oauth_callback(
     except Exception as e:
         return _google_error_redirect("failed", str(e))
 
+    # Only a freshly CREATED account is a signup. Signing in to an existing
+    # account (via sub, a link, or a takeover) is not, and counting it would
+    # inflate the exact number this event exists to report.
+    if identity.get("via") == "created":
+        from src.analytics import track
+
+        track("signup_completed", user_id=user_id, props={"method": "google"})
+
     expires_in = settings.jwt_expire_hours * 3600
     redirect = RedirectResponse(
         google_oauth.complete_redirect_url(token, expires_in), status_code=302
@@ -2710,6 +2800,10 @@ async def screen_stocks(request: Request, response: Response, payload: ScreenReq
                 payload.offset,
                 payload.sort_by,
             )
+            # A cache hit is still a screen the user saw, so the funnel counts
+            # it. Only the interpret_* event is skipped — the interpreter did
+            # not run, and claiming it did would overstate the LLM cost split.
+            _track_screen_returned(cached)
             return cached
 
     logger.info(
@@ -2771,6 +2865,7 @@ async def screen_stocks(request: Request, response: Response, payload: ScreenReq
     # cache follows: only successes are worth serving again.
     if settings.cache_enabled and not report.data_quality.get("error"):
         _screen_cache.set(cache_key, response)
+    _track_screen_returned(response)
     return response
 
 
@@ -2808,6 +2903,76 @@ async def interpret_only(request: Request, response: Response, payload: Interpre
             f"{len(interpreted.filters)} numeric filters"
         ),
     }
+
+
+class EventRequest(BaseModel):
+    """A browser-reported analytics event (POST /events).
+
+    Only ``name`` is validated here; the allowlist that actually matters is
+    ``src.analytics.CLIENT_EVENTS``, applied in the handler so the event
+    vocabulary stays in exactly one place.
+    """
+
+    name: str
+    props: Optional[Dict[str, Any]] = None
+
+
+@app.post(
+    "/events",
+    status_code=204,
+    summary="Record a browser-side analytics event",
+    tags=["System"],
+)
+async def submit_event(request: Request, payload: EventRequest):
+    """Record one browser event from the app's fire-and-forget ``track()``.
+
+    Public by design: the events that matter most happen BEFORE an account
+    exists (a landing view, a first screen, a signup form mount). The
+    ``X-Anon-Id`` header carries the browser's local UUID so the anonymous and
+    signed-in halves of one person's funnel join up; the Bearer token, when
+    present, attributes the event to the account.
+
+    A server-only name (``backtest_completed`` and friends) is rejected with
+    400 rather than ignored: those events are derived from real work, and
+    accepting them from a browser would let a script forge the funnel.
+
+    Rate limiting is deliberately left in the default ``read`` scope — this is
+    a cheap insert, and a dedicated scope would add a bucket to every
+    submitting surface the browser calls. See ``_scope_for_path``.
+    """
+    from src.analytics import CLIENT_EVENTS, track
+
+    if payload.name not in CLIENT_EVENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{payload.name}' is not a client-reportable event.",
+        )
+
+    # Optional attribution: never 401. A missing or expired token just means
+    # the event lands anonymously — the browser retries nothing, and the
+    # funnel stays honest instead of losing the row.
+    user_id: Optional[int] = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        from src.auth import verify_access_token
+
+        claims = verify_access_token(auth_header[7:].strip())
+        if claims:
+            try:
+                user_id = int(claims.get("sub"))
+            except (TypeError, ValueError):
+                user_id = None
+
+    track(
+        payload.name,
+        user_id=user_id,
+        anon_id=request.headers.get("x-anon-id"),
+        props=payload.props,
+    )
+    # 204 unconditionally, even if the write failed: track() swallows its own
+    # failures, and a telemetry endpoint that reports errors the client cannot
+    # act on would only add noise to the browser console.
+    return Response(status_code=204)
 
 
 def _run_backtest_pipeline(
@@ -2850,6 +3015,7 @@ def _run_backtest_pipeline(
             status_code=502,
             detail="Failed to interpret strategy. Please try again later.",
         )
+    _track_interpret(interpreted)
 
     # interpret_query never raises for LLM failures — it returns an
     # InterpretedQuery with .error set and empty filters. Silently running
@@ -3090,12 +3256,34 @@ async def backtest_strategy(
     4. Simulates trading with fees and slippage
     5. Calculates Sharpe ratio, max drawdown, win rate
     """
-    strategy_rules, bt_results, screen_message, portfolio = _run_backtest_pipeline(
-        payload, user
-    )
-    return _build_backtest_response(
-        payload, strategy_rules, bt_results, screen_message, portfolio
-    )
+    from src.analytics import track
+
+    mode = "sync"
+    symbols = _backtest_symbol_count(payload)
+    user_id = _user_id_of(user)
+    track("backtest_started", user_id=user_id,
+          props={"symbols": symbols, "mode": mode})
+    started = time.monotonic()
+    try:
+        strategy_rules, bt_results, screen_message, portfolio = _run_backtest_pipeline(
+            payload, user
+        )
+        response_payload = _build_backtest_response(
+            payload, strategy_rules, bt_results, screen_message, portfolio
+        )
+    except Exception as e:  # noqa: BLE001 — recorded, then re-raised unchanged
+        # The client's response is untouched: this only adds a funnel row for
+        # the failure. HTTPException keeps its status; anything else still
+        # reaches generic_exception_handler.
+        track("backtest_failed", user_id=user_id,
+              props={"mode": mode, "reason": _backtest_failure_reason(e)})
+        raise
+    track("backtest_completed", user_id=user_id,
+          props={"symbols": symbols, "mode": mode})
+    track("backtest_duration", user_id=user_id,
+          props={"duration_ms": int((time.monotonic() - started) * 1000),
+                 "mode": mode})
+    return response_payload
 
 
 def _build_backtest_response(
@@ -3459,6 +3647,9 @@ async def backtest_async(
             cur["status"] = "running"
 
     def _run() -> None:
+        from src.analytics import track
+
+        started = time.monotonic()
         try:
             with _BACKTEST_JOBS_LOCK:
                 _BACKTEST_JOBS[job_id]["status"] = "running"
@@ -3477,6 +3668,11 @@ async def backtest_async(
                 job_id, user.get("email", ""), payload.query, "done",
                 phase="done", result=result,
             )
+            track("backtest_completed", user_id=user_id,
+                  props={"symbols": symbols, "mode": "async"})
+            track("backtest_duration", user_id=user_id,
+                  props={"duration_ms": int((time.monotonic() - started) * 1000),
+                         "mode": "async"})
         except Exception as e:  # noqa: BLE001 — job must always finalize
             logger.error("Async backtest %s failed: %s", job_id, e)
             with _BACKTEST_JOBS_LOCK:
@@ -3486,7 +3682,15 @@ async def backtest_async(
                 job_id, user.get("email", ""), payload.query, "error",
                 error=str(e)[:500],
             )
+            track("backtest_failed", user_id=user_id,
+                  props={"mode": "async", "reason": _backtest_failure_reason(e)})
 
+    from src.analytics import track
+
+    user_id = _user_id_of(user)
+    symbols = int(job["total_symbols"])
+    track("backtest_started", user_id=user_id,
+          props={"symbols": symbols, "mode": "async"})
     threading.Thread(target=_run, daemon=True).start()
     return {
         "job_id": job_id,
@@ -4366,6 +4570,43 @@ async def admin_jobs(
         return monitor.summary()
     finally:
         monitor.close()
+
+
+@app.get(
+    "/admin/events",
+    response_model=Dict[str, Any],
+    summary="Recent product events, newest first — admin only",
+    tags=["Admin"],
+)
+async def admin_events(
+    request: Request,
+    response: Response,
+    limit: int = 100,
+    admin: Dict[str, Any] = Depends(require_admin),
+):
+    """The raw event stream — how the owner walks the funnel.
+
+    No aggregation on purpose: the point of this read-out is to see the events
+    land in the order they actually happened (landing → signup → screen →
+    backtest → share → backtest again), which an aggregate would hide. Each
+    row is ``{name, occurred_at, anon_id, user_id, props}``.
+
+    ``limit`` is clamped here rather than validated into a 422 — an operator
+    pasting a silly number should get data, not an error page. Returns
+    ``{count, events}``; the wrapper matches every other ``/admin`` payload,
+    and ``count`` answers "did all fifteen land" without a second call.
+    """
+    from src.analytics import recent_events
+
+    try:
+        events = recent_events(limit=max(1, min(int(limit), 500)))
+    except Exception as e:
+        # Degrade to an empty list rather than 500: the dashboard is the one
+        # place an operator goes when things are broken, so it must not be the
+        # one place that breaks too.
+        logger.warning("Admin events read failed: %s", e)
+        events = []
+    return {"count": len(events), "events": events}
 
 
 @app.get(

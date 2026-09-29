@@ -183,6 +183,14 @@ class InterpretedQuery:
     # the interpreter could not produce criteria — callers should surface this
     # to the user instead of silently returning the whole stock universe.
     error: Optional[str] = None
+    # Which path produced this interpretation: ``"deterministic"`` (the $0
+    # regex parser) or ``"llm"`` (a paid provider call). Empty means the
+    # interpretation never happened (empty query, or a failed LLM call).
+    # Exists so the API layer can record the funnel's cost split without the
+    # interpreter knowing anything about analytics; a cache hit keeps the
+    # source the entry was created with, so the split is measured against the
+    # work actually done, not against what re-requesting a query costs.
+    source: str = ""
 
     @property
     def has_derived_criteria(self) -> bool:
@@ -350,6 +358,7 @@ def interpret_query(query: str) -> InterpretedQuery:
                     "Deterministic parse (conf=%.2f) for '%s': %d filters",
                     det_conf, query, len(det_result.filters),
                 )
+                det_result.source = "deterministic"
                 if settings.cache_enabled:
                     _interpret_cache.set(key, copy.deepcopy(det_result))
                 return det_result
@@ -405,6 +414,7 @@ def interpret_query(query: str) -> InterpretedQuery:
             sector=sector,
             industry=industry,
             momentum=momentum,
+            source="llm",
             **derived,
         )
         if settings.cache_enabled:

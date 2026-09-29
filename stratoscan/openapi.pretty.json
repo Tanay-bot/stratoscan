@@ -835,6 +835,41 @@
         }
       }
     },
+    "/events": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Record a browser-side analytics event",
+        "description": "Record one browser event from the app's fire-and-forget ``track()``.\n\nPublic by design: the events that matter most happen BEFORE an account\nexists (a landing view, a first screen, a signup form mount). The\n``X-Anon-Id`` header carries the browser's local UUID so the anonymous and\nsigned-in halves of one person's funnel join up; the Bearer token, when\npresent, attributes the event to the account.\n\nA server-only name (``backtest_completed`` and friends) is rejected with\n400 rather than ignored: those events are derived from real work, and\naccepting them from a browser would let a script forge the funnel.\n\nRate limiting is deliberately left in the default ``read`` scope \u2014 this is\na cheap insert, and a dedicated scope would add a bucket to every\nsubmitting surface the browser calls. See ``_scope_for_path``.",
+        "operationId": "submit_event_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/backtest": {
       "post": {
         "tags": [
@@ -1551,6 +1586,52 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Admin Jobs Admin Jobs Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/events": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Recent product events, newest first \u2014 admin only",
+        "description": "The raw event stream \u2014 how the owner walks the funnel.\n\nNo aggregation on purpose: the point of this read-out is to see the events\nland in the order they actually happened (landing \u2192 signup \u2192 screen \u2192\nbacktest \u2192 share \u2192 backtest again), which an aggregate would hide. Each\nrow is ``{name, occurred_at, anon_id, user_id, props}``.\n\n``limit`` is clamped here rather than validated into a 422 \u2014 an operator\npasting a silly number should get data, not an error page. Returns\n``{count, events}``; the wrapper matches every other ``/admin`` payload,\nand ``count`` answers \"did all fifteen land\" without a second call.",
+        "operationId": "admin_events_admin_events_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Admin Events Admin Events Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2514,6 +2595,32 @@
         ],
         "title": "EnrichResponse",
         "description": "Response from a screen + enrich operation."
+      },
+      "EventRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "props": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Props"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "EventRequest",
+        "description": "A browser-reported analytics event (POST /events).\n\nOnly ``name`` is validated here; the allowlist that actually matters is\n``src.analytics.CLIENT_EVENTS``, applied in the handler so the event\nvocabulary stays in exactly one place."
       },
       "FilterFieldMeta": {
         "properties": {

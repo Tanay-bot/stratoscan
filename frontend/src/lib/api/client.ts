@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios'
+import { getAnonId } from '@/lib/analytics'
 import { ApiError } from './types'
 
 /**
@@ -76,6 +77,15 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  // Anonymous visitor id on EVERY call. Server-side events (a screen, a
+  // backtest) are attributed to users who have already signed in, but the
+  // same request a moment earlier was made by an anonymous visitor — without
+  // this header the funnel cannot join the two halves of one person. It is a
+  // localStorage UUID, not a cookie: it is not sent to any third party and it
+  // disappears with the browser's site data. `getAnonId` is a hoisted function
+  // declaration in ./analytics, so the module cycle between these two files
+  // is safe regardless of which one is evaluated first.
+  config.headers['X-Anon-Id'] = getAnonId()
   return config
 })
 

@@ -48,6 +48,7 @@ import {
   exportBacktestCsv,
 } from '@/lib/api/services'
 import { delay, toApiError, DEMO_MODE } from '@/lib/api/client'
+import { track } from '@/lib/analytics'
 import { toast } from '@/store/notifications'
 import { usePersonal } from '@/store/personal'
 import { useRateLimit, useRateLimitCountdown } from '@/store/rateLimit'
@@ -165,6 +166,9 @@ export function Backtest() {
   const run = async (q: string) => {
     const trimmed = q.trim()
     if (!trimmed) return
+    // The same event the Screener fires, distinguished by `surface` so the
+    // two entry points can be compared. Again: no query text.
+    track('query_submitted', { surface: 'backtest' })
     if (trimmed !== lastQuery.current) {
       lastQuery.current = trimmed
       setParams({ q: trimmed }, { replace: false })
@@ -1018,6 +1022,11 @@ export function Backtest() {
                   } catch {
                     window.prompt('Copy your shareable backtest link:', url)
                   }
+                  // Reached in both branches — clipboard or the prompt — so it
+                  // means "the link was put in the user's hands", which is the
+                  // sharing signal worth counting. No props: a share has
+                  // nothing to describe that would not be user content.
+                  track('result_shared')
                 }}
                 disabled={!result}
               >

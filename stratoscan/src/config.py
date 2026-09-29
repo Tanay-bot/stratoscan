@@ -332,6 +332,15 @@ class Settings(BaseSettings):
     screen_cache_ttl: int = 60                # 60s — refresh cadence is 10 min, 60s stays fresh
     screen_cache_max_entries: int = 1024
 
+    # ── Product analytics (src/analytics.py) ───────────────────────────
+    # Master switch for the event funnel. When False, ``analytics.track()`` is
+    # a no-op: nothing is written to the ``events`` table, and no derived event
+    # (second_backtest / returned_day_2 / returned_day_7) is computed. Call
+    # sites stay in place, so flipping this back on re-enables the funnel
+    # without a code change. Default True — the first cohort teaches its
+    # lesson exactly once, so the funnel is on unless deliberately disabled.
+    analytics_enabled: bool = True
+
     # ── CORS (browser security) ─────────────────────────────────────────
     # Comma-separated list of origins allowed to call the API from a browser.
     # LOCKED DOWN from the old wildcard: with allow_credentials=True a "*"

@@ -20,6 +20,7 @@ import { StockRow } from '@/components/StockRow'
 import { EmptyState } from '@/components/EmptyState'
 import { downloadBlob, exportScreenCsv, screen } from '@/lib/api/services'
 import { toApiError } from '@/lib/api/client'
+import { track } from '@/lib/analytics'
 import { toast } from '@/store/notifications'
 import { useRateLimit, useRateLimitCountdown } from '@/store/rateLimit'
 import type { ScreenResponse } from '@/lib/api/types'
@@ -110,6 +111,13 @@ export function Screener() {
   const submit = (q: string) => {
     const trimmed = q.trim()
     if (!trimmed) return
+    // Only a deliberate submit is a query. `run()` is also reached from the
+    // [query] effect when a shared link or a saved screen loads this page —
+    // that is a page view, not the user asking a question, and counting it
+    // would inflate every submit metric. No query text is sent: it is user
+    // content, and `surface` is all the funnel needs to split the two
+    // entry points.
+    track('query_submitted', { surface: 'screener' })
     if (trimmed === query) {
       // Same query: the URL-param effect won't re-fire, so run directly.
       // The changed-query path is owned by the [query] effect — running
@@ -197,10 +205,12 @@ export function Screener() {
           'undervalued small-cap tech stocks',
           'high-dividend energy companies',
           'momentum breakout stocks',
-        ].map((ex) => (
+        ].map((ex, i) => (
           <button
             key={ex}
             onClick={() => {
+              // The chip's id, not its text — see the Landing examples.
+              track('template_used', { template: `screener-chip-${i}` })
               setDraft(ex)
               submit(ex)
             }}

@@ -9,6 +9,7 @@ of :class:`FakeLLMRouter` before constructing the TestClient.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
@@ -476,3 +477,101 @@ class FakeQualityDB:
         for col in columns or []:
             out[col] = sum(1 for r in self._records if r.get(col) is not None)
         return out
+
+
+class FakeEventDB:
+    """In-memory stand-in for PostgresDB's event + error-log methods.
+
+    Mirrors the exact method surface ``src.analytics`` and the API's generic
+    exception handler use, so a suite can exercise the REAL ``track()`` — the
+    prop whitelist, the UUID check, the derived events — with zero database
+    access. Patch it in as ``src.analytics._db`` (and as the API handler's
+    ``PostgresDB``) before calling.
+
+    ``now`` is settable on purpose: the day-2 / day-7 derivations compare UTC
+    CALENDAR DATES, so a test has to be able to place an event on "yesterday"
+    without waiting a day. Move ``now``, insert, and the arithmetic is real.
+    """
+
+    def __init__(self, now: Optional[datetime] = None) -> None:
+        self.events: List[Dict[str, Any]] = []
+        self.errors: List[Dict[str, Any]] = []
+        self.now: datetime = now or datetime.now(timezone.utc)
+
+    # ── helpers ─────────────────────────────────────────────────────────
+    def _matches(self, row: Dict[str, Any], user_id: Optional[int],
+                 anon_id: Optional[str]) -> bool:
+        """Identity rule, identical to PostgresDB._event_identity_where."""
+        if user_id is not None:
+            return row["user_id"] == user_id
+        if anon_id:
+            return row["anon_id"] == anon_id
+        return False
+
+    @property
+    def names(self) -> List[str]:
+        """Recorded event names in insertion order — the funnel walk."""
+        return [e["name"] for e in self.events]
+
+    def names_for(self, *, user_id: Optional[int] = None,
+                  anon_id: Optional[str] = None) -> List[str]:
+        """One identity's event names in insertion order."""
+        return [
+            e["name"] for e in self.events
+            if self._matches(e, user_id, anon_id)
+        ]
+
+    def seed(self, name: str, *, user_id: Optional[int] = None,
+             anon_id: Optional[str] = None, occurred_at: Optional[datetime] = None,
+             props: Optional[Dict[str, Any]] = None) -> None:
+        """Insert a row directly, bypassing track() (a past event)."""
+        self.events.append({
+            "name": name,
+            "user_id": user_id,
+            "anon_id": anon_id,
+            "props": props or {},
+            "occurred_at": occurred_at or self.now,
+        })
+
+    # ── PostgresDB event surface ────────────────────────────────────────
+    def insert_event(self, name: str, user_id: Optional[int] = None,
+                     anon_id: Optional[str] = None,
+                     props: Optional[Dict[str, Any]] = None) -> None:
+        self.seed(name, user_id=user_id, anon_id=anon_id, props=props)
+
+    def count_events(self, name: str, user_id: Optional[int] = None,
+                     anon_id: Optional[str] = None) -> int:
+        return sum(
+            1 for e in self.events
+            if e["name"] == name and self._matches(e, user_id, anon_id)
+        )
+
+    def first_event_at(self, user_id: Optional[int] = None,
+                       anon_id: Optional[str] = None) -> Optional[datetime]:
+        times = [
+            e["occurred_at"] for e in self.events
+            if self._matches(e, user_id, anon_id)
+        ]
+        return min(times) if times else None
+
+    def has_event(self, name: str, user_id: Optional[int] = None,
+                  anon_id: Optional[str] = None) -> bool:
+        return self.count_events(name, user_id, anon_id) > 0
+
+    def list_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Newest first, matching PostgresDB.list_events' ordering."""
+        return list(reversed(self.events))[:limit]
+
+    # ── PostgresDB error-log surface ────────────────────────────────────
+    def insert_error(self, method: str, route: str, error_type: str,
+                     trace: str) -> None:
+        self.errors.append({
+            "occurred_at": self.now,
+            "method": method,
+            "route": route,
+            "error_type": error_type,
+            "trace": trace,
+        })
+
+    def list_errors(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return list(reversed(self.errors))[:limit]
