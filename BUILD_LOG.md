@@ -15,7 +15,9 @@ of it. 45/45 backend, 219/219 frontend.
 address first, verification never checked — fixed, and the test that asserted the bypass
 rewritten. Resend-verification was sending email outside the SendGrid budget. Verification
 links failed on the second click, i.e. on the first real click behind a mail scanner.
-Still open: email change, Google OAuth (needs a client ID), register's 409 enumeration.
+Then Google sign-in (Freebuff, reviewed): server-side code exchange, and a Google sign-in that
+matches an unverified signup takes the row over — squatter's password, sessions and saved data
+all gone. Still open: email change, register's 409 enumeration (settle with Day 6).
 
 ## Day 2 — The scheduler runs, unattended
 
