@@ -317,6 +317,8 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/auth/password-reset/confirm` | — | set password, verify email, revoke all sessions |
 | POST | `/auth/change-password` | Bearer | revoke other sessions; returns a fresh token (wrong current pw = 400, never 401) |
 | POST | `/auth/refresh` | Bearer | sliding session: same `ver`, `auth_time` carried; refused past `SESSION_MAX_AGE_DAYS` |
+| GET | `/auth/google/start` | — | "Continue with Google": 302 to Google's consent screen + signed `g_oauth` state cookie (`src/google_oauth.py`) |
+| GET | `/auth/google/callback` | — | server-side code exchange → ID-token claims → the merge rule → 302 to `/auth/google/complete#token=…&expires_in=…`; failures redirect to `/login?oauth_error=<code>` |
 | POST | `/auth/delete-account` | Bearer | password re-entry; deletes user + `user_data` (cascade) + `backtest_jobs` (no FK — explicit) in one tx |
 | POST | `/screen` | — | NL query → ranked, paginated stocks (60s cache) |
 | POST | `/interpret` | — | debug: NL query → filters only |

@@ -5,13 +5,52 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { ArrowLeft, ArrowRight, Mail, ShieldCheck, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Logo } from '@/components/Logo'
 import { useAuth } from '@/store/auth'
 import { toast } from '@/store/notifications'
-import { DEMO_MODE } from '@/lib/api/client'
+import { API_ORIGIN, DEMO_MODE } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+
+/**
+ * Friendly copy for each `oauth_error` code the API redirects back with
+ * (see src/api.py + src/google_oauth.py). One sentence each, never the raw
+ * code: the codes exist to route, not to be read.
+ */
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  unavailable: 'Google sign-in is not set up on this server. Use your email and password instead.',
+  state: 'That sign-in attempt could not be verified and has expired. Please try again.',
+  exchange: 'Google sign-in could not be completed. Please try again.',
+  token: "We couldn't verify the response from Google. Please try again.",
+  unverified: "Your Google account's email isn't verified",
+  failed: 'Google sign-in failed. Please try again.',
+}
+const OAUTH_ERROR_FALLBACK = 'Google sign-in failed. Please try again.'
+
+/** Google's official four-colour "G", inline (no icon dependency). */
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+      <path
+        fill="#4285F4"
+        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+      />
+    </svg>
+  )
+}
 
 const loginSchema = z.object({
   email: z.string().email('Enter a valid email address'),
@@ -44,6 +83,13 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
   const next = (location.state as { from?: string } | null)?.from
   const params = new URLSearchParams(location.search)
   const nextParam = next ?? params.get('next') ?? '/app'
+  // "Continue with Google" comes back through /login?oauth_error=… — the API
+  // redirects here with a code, and this is the only place it is turned into
+  // something a person can act on.
+  const oauthErrorCode = params.get('oauth_error')
+  const oauthError = oauthErrorCode
+    ? (OAUTH_ERROR_MESSAGES[oauthErrorCode] ?? OAUTH_ERROR_FALLBACK)
+    : null
 
   const form = useForm<AuthValues>({
     resolver: zodResolver(mode === 'login' ? loginSchema : signupSchema) as never,
@@ -148,6 +194,38 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
                   : 'Free forever. No paywall, no credits.'}
               </p>
 
+              {oauthError && (
+                <p
+                  role="alert"
+                  className="rounded-xl border border-loss/30 bg-loss/10 px-3 py-2 text-xs text-loss-soft"
+                >
+                  {oauthError}
+                </p>
+              )}
+
+              {/*
+                A plain link, not an axios call: the browser has to NAVIGATE to
+                the API's /auth/google/start so the 302 to Google (and the state
+                cookie it sets) are handled by the browser itself.
+              */}
+              {!DEMO_MODE && (
+                <>
+                  <a
+                    href={`${API_ORIGIN}/auth/google/start`}
+                    className={cn(buttonVariants({ variant: 'secondary' }), 'w-full')}
+                  >
+                    <GoogleMark />
+                    Continue with Google
+                  </a>
+
+                  <div className="flex items-center gap-3" aria-hidden="true">
+                    <span className="h-px flex-1 bg-white/10" />
+                    <span className="text-2xs uppercase tracking-wider text-text-low">or</span>
+                    <span className="h-px flex-1 bg-white/10" />
+                  </div>
+                </>
+              )}
+
               <div className="space-y-1.5">
                 <label
                   htmlFor="email"
@@ -231,39 +309,6 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
               <Button type="submit" size="lg" className="w-full" loading={submitting}>
                 {submitting ? 'Please wait…' : isLogin ? 'Log in' : 'Create account'}
                 {!submitting && <ArrowRight className="h-4 w-4" aria-hidden="true" />}
-              </Button>
-
-              <div className="flex items-center gap-3" aria-hidden="true">
-                <span className="h-px flex-1 bg-white/10" />
-                <span className="text-2xs uppercase tracking-wider text-text-low">or</span>
-                <span className="h-px flex-1 bg-white/10" />
-              </div>
-
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                onClick={() => toast.info('Google sign-in', 'Coming soon — use email for now.')}
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                  />
-                </svg>
-                Sign in with Google
               </Button>
 
               {DEMO_MODE && (

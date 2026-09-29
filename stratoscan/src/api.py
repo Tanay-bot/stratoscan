@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from src.config import settings
@@ -2192,6 +2192,138 @@ async def logout_all(
         "token_version": new_version,
         "message": "All sessions are logged out. Log in again for a new token.",
     }
+
+
+# ── Google OAuth ("Continue with Google") ───────────────────────────────
+# Two thin routes; everything Google-specific — the state cookie, the token
+# exchange, ID-token validation and the account merge rule — lives in
+# src/google_oauth.py. Both paths fall into the `auth` rate-limit scope by
+# prefix, so RATE_LIMITS and _scope_for_path are deliberately untouched.
+
+
+def _google_error_redirect(code: str, reason: str = "") -> RedirectResponse:
+    """302 to the frontend login page with an ``oauth_error`` code.
+
+    The real reason is logged; only the code reaches the browser (golden rule
+    #12 — no raw exception text in responses). The state cookie is cleared on
+    every outcome, success or failure: a survivor must never be reused by a
+    later attempt.
+    """
+    from src import google_oauth
+
+    logger.warning(
+        "Google sign-in failed (%s)%s", code, f": {reason}" if reason else ""
+    )
+    redirect = RedirectResponse(google_oauth.login_error_url(code), status_code=302)
+    redirect.delete_cookie(google_oauth.COOKIE_NAME, path=google_oauth.COOKIE_PATH)
+    return redirect
+
+
+@app.get(
+    "/auth/google/start",
+    summary="Begin Google sign-in (302 to Google)",
+    tags=["Auth"],
+)
+async def google_oauth_start(request: Request, response: Response):
+    """Send the browser to Google's consent screen with a signed state cookie.
+
+    A plain 302 for an ``<a href>``: no JavaScript, no popup, and no token in
+    the URL until the callback arrives. When the credential pair — or the JWT
+    secret that signs the state — is missing, this degrades to the login page
+    instead of to a consent screen that could never be completed.
+    """
+    from src import google_oauth
+
+    if not settings.has_google_oauth or not settings.has_jwt_secret:
+        return _google_error_redirect("unavailable", "google oauth not configured")
+
+    url, cookie_value = google_oauth.begin_authorization()
+    redirect = RedirectResponse(url, status_code=302)
+    redirect.set_cookie(**google_oauth.cookie_settings(cookie_value))
+    return redirect
+
+
+@app.get(
+    "/auth/google/callback",
+    summary="Finish Google sign-in (server-side code exchange)",
+    tags=["Auth"],
+)
+async def google_oauth_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    error: str = "",
+):
+    """Exchange the code, validate the ID token, apply the merge rule, sign in.
+
+    The parameters are plain optional strings on purpose: Google sends
+    ``?error=access_denied`` when the user declines, and a missing ``code``
+    has to become a friendly redirect rather than a 422 from FastAPI.
+    """
+    from src import google_oauth
+    from src.auth import create_access_token
+    from src.database import PostgresDB
+
+    if not settings.has_google_oauth or not settings.has_jwt_secret:
+        return _google_error_redirect("unavailable", "google oauth not configured")
+
+    # CSRF defence, and it is not optional. The cookie must verify (HMAC keyed
+    # by jwt_secret) AND its `state` must equal the one Google echoed back.
+    # Without this, an attacker can hand a victim's browser a callback carrying
+    # the ATTACKER's code — the victim is then silently signed into the
+    # attacker's account, and everything they do lands there.
+    claims = google_oauth.verify_state_cookie(
+        request.cookies.get(google_oauth.COOKIE_NAME)
+    )
+    if not claims:
+        return _google_error_redirect("state", "missing or unverifiable state cookie")
+    if not google_oauth.state_matches(claims, state):
+        return _google_error_redirect("state", "state did not match the cookie")
+
+    if error or not code:
+        return _google_error_redirect("failed", f"no code (error={error!r})")
+
+    try:
+        tokens = google_oauth.exchange_code(code)
+    except Exception as e:
+        return _google_error_redirect("exchange", str(e))
+
+    id_token = tokens.get("id_token")
+    if not id_token:
+        return _google_error_redirect("token", "token response carried no id_token")
+
+    try:
+        payload = google_oauth.validate_id_token(id_token, claims["nonce"])
+    except google_oauth.IdTokenError as e:
+        return _google_error_redirect(e.code, str(e))
+    except Exception as e:
+        return _google_error_redirect("token", str(e))
+
+    sub = str(payload.get("sub") or "")
+    email = str(payload.get("email") or "").strip().lower()
+    if not sub or not email:
+        return _google_error_redirect("token", "id_token lacked sub/email")
+
+    try:
+        db = PostgresDB()
+        identity = google_oauth.resolve_google_identity(db, sub, email)
+        user_id = int(identity["id"])
+        # Google proved the address, so ADMIN_EMAILS applies immediately — the
+        # same rule as a clicked verification link (see _bootstrap_admin_role).
+        _bootstrap_admin_role(db, email, user_id, bool(identity["is_admin"]), True)
+        token = create_access_token(user_id, email, int(identity["token_version"]))
+    except Exception as e:
+        return _google_error_redirect("failed", str(e))
+
+    expires_in = settings.jwt_expire_hours * 3600
+    redirect = RedirectResponse(
+        google_oauth.complete_redirect_url(token, expires_in), status_code=302
+    )
+    redirect.delete_cookie(google_oauth.COOKIE_NAME, path=google_oauth.COOKIE_PATH)
+    logger.info(
+        "Google sign-in: user %s signed in (via %s)", user_id, identity.get("via")
+    )
+    return redirect
 
 
 # ── Password reset & change ─────────────────────────────────────────────

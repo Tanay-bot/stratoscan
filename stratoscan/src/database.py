@@ -461,6 +461,7 @@ CREATE TABLE IF NOT EXISTS users (
     token_version       INTEGER NOT NULL DEFAULT 0,
     reset_token_hash    TEXT,
     reset_token_expires TIMESTAMPTZ,
+    google_sub          TEXT UNIQUE,
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 """
@@ -503,6 +504,17 @@ USERS_PASSWORD_RESET_BACKFILL = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ",
     "CREATE INDEX IF NOT EXISTS idx_users_reset_token_hash ON users (reset_token_hash)",
+]
+
+# Google identity ("Continue with Google", src/google_oauth.py).
+# ``google_sub`` is Google's subject id: stable forever for an account, and
+# therefore the thing that identifies a returning sign-in — a Google email
+# can change, the sub cannot. UNIQUE so two rows can never claim one Google
+# identity (Postgres permits any number of NULLs in a unique index, so every
+# email/password account is unaffected). NULL means "no Google identity".
+USERS_GOOGLE_SUB_BACKFILL = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub ON users (google_sub)",
 ]
 
 # ── PostgreSQL (main DB): job_runs table ─────────────────────────────
@@ -679,6 +691,7 @@ class PostgresDB:
                     USERS_EMAIL_VERIFICATION_BACKFILL
                     + USERS_TOKEN_VERSION_BACKFILL
                     + USERS_PASSWORD_RESET_BACKFILL
+                    + USERS_GOOGLE_SUB_BACKFILL
                 ):
                     try:
                         cur.execute(stmt)
@@ -1119,6 +1132,140 @@ class PostgresDB:
                 row = cur.fetchone()
             conn.commit()
         return int(row[0]) if row else 0
+
+    # ── Google OAuth ("Continue with Google") ─────────────────────────
+
+    def get_user_by_google_sub(self, sub: str) -> Optional[Dict[str, Any]]:
+        """Fetch the account linked to a Google subject id, or None.
+
+        Args:
+            sub: The ``sub`` claim of a validated Google ID token.
+
+        Returns:
+            Dict with id, email, is_admin, token_version — or None. The
+            caller does NOT need the password hash: a Google sign-in never
+            verifies one.
+        """
+        sql = """
+            SELECT id, email, is_admin, token_version
+            FROM users WHERE google_sub = %s
+        """
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (sub,))
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def link_google_identity(self, user_id: int, sub: str) -> None:
+        """Attach a Google subject id to an existing, already-verified account.
+
+        Used when the Google email matches a verified password account: the
+        account keeps its password AND gains a working Google sign-in.
+
+        Args:
+            user_id: The user's database id.
+            sub: The validated Google subject id.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET google_sub = %s WHERE id = %s",
+                    (sub, user_id),
+                )
+            conn.commit()
+        logger.info("Google identity linked to user %d", user_id)
+
+    def take_over_for_google(self, user_id: int, sub: str, unusable_hash: str) -> int:
+        """Hand an UNVERIFIED account to the Google identity that owns its address.
+
+        The account-takeover case, and the reason this method exists.
+        Anyone can register an address they do not own — a fresh install has
+        no way to tell. If such a row were merely linked, the stranger's
+        password would keep opening an account that now belongs to the real
+        owner, and the session they already hold would stay alive. So the
+        row is taken over in ONE statement:
+
+          - ``password_hash`` becomes a real PBKDF2 hash of a random value
+            nobody knows — the stranger's password stops working, and the
+            verification cost stays identical to a normal login (a marker
+            string like ``"!"`` would fail faster and leak which accounts
+            are Google-only);
+          - ``google_sub`` is set and ``email_verified`` becomes TRUE (Google
+            vouched for the address);
+          - every pending verification/reset token is cleared;
+          - ``token_version`` increments, killing every session the stranger
+            held — the same mechanism as POST /auth/logout-all.
+
+        Args:
+            user_id: The user's database id.
+            sub: The validated Google subject id.
+            unusable_hash: A PBKDF2 hash of a random secret (see
+                ``google_oauth.unusable_password_hash``).
+
+        Returns:
+            The new token_version, which the caller stamps into the token it
+            mints for the real owner.
+        """
+        sql = (
+            "UPDATE users SET password_hash = %s, google_sub = %s, "
+            "email_verified = TRUE, "
+            "verification_token = NULL, verification_token_expires = NULL, "
+            "reset_token_hash = NULL, reset_token_expires = NULL, "
+            "token_version = token_version + 1 "
+            "WHERE id = %s RETURNING token_version"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (unusable_hash, sub, user_id))
+                row = cur.fetchone()
+            conn.commit()
+        new_version = int(row[0]) if row else 0
+        logger.info(
+            "Unverified account %d taken over by Google identity (token_version=%d)",
+            user_id, new_version,
+        )
+        return new_version
+
+    def create_google_user(self, email: str, sub: str, unusable_hash: str) -> int:
+        """Create the account for a first-time Google sign-in.
+
+        Starts verified (Google proved the address) and password-less: the
+        stored hash is a real PBKDF2 hash of a random secret, so no password
+        can ever match it and login stays timing-identical to any other
+        account. A Google-only user who wants a password uses "Forgot
+        password".
+
+        Args:
+            email: The verified Google email (lowercased here).
+            sub: The validated Google subject id.
+            unusable_hash: A PBKDF2 hash of a random secret.
+
+        Returns:
+            The new user's id.
+
+        Raises:
+            psycopg2.IntegrityError: if the email is already registered (a
+            concurrent callback won the race).
+        """
+        sql = """
+            INSERT INTO users (email, password_hash, plan, email_verified, google_sub)
+            VALUES (%s, %s, 'free', TRUE, %s)
+            RETURNING id
+        """
+        with self._get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (email.lower().strip(), unusable_hash, sub))
+                    user_id = cur.fetchone()[0]
+                conn.commit()
+            except Exception:
+                # Roll back before the connection goes back to the pool — an
+                # aborted transaction would poison every later query on it
+                # (same contract as create_user).
+                conn.rollback()
+                raise
+        logger.info("Created Google account %s (id=%d)", email, user_id)
+        return user_id
 
     # ── Account deletion ────────────────────────────────────────────
 

@@ -467,6 +467,88 @@
         }
       }
     },
+    "/auth/google/start": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Begin Google sign-in (302 to Google)",
+        "description": "Send the browser to Google's consent screen with a signed state cookie.\n\nA plain 302 for an ``<a href>``: no JavaScript, no popup, and no token in\nthe URL until the callback arrives. When the credential pair \u2014 or the JWT\nsecret that signs the state \u2014 is missing, this degrades to the login page\ninstead of to a consent screen that could never be completed.",
+        "operationId": "google_oauth_start_auth_google_start_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google/callback": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Finish Google sign-in (server-side code exchange)",
+        "description": "Exchange the code, validate the ID token, apply the merge rule, sign in.\n\nThe parameters are plain optional strings on purpose: Google sends\n``?error=access_denied`` when the user declines, and a missing ``code``\nhas to become a friendly redirect rather than a 422 from FastAPI.",
+        "operationId": "google_oauth_callback_auth_google_callback_get",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Code"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "State"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/password-reset/request": {
       "post": {
         "tags": [

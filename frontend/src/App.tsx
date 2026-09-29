@@ -32,6 +32,9 @@ const Settings = lazy(() => import('@/pages/Settings').then((m) => ({ default: m
 const VerifyEmail = lazy(() =>
   import('@/pages/VerifyEmail').then((m) => ({ default: m.VerifyEmail })),
 )
+const GoogleComplete = lazy(() =>
+  import('@/pages/GoogleComplete').then((m) => ({ default: m.GoogleComplete })),
+)
 const ForgotPassword = lazy(() =>
   import('@/pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })),
 )
@@ -95,6 +98,10 @@ export default function App() {
             <Route path="/login" element={<Auth mode="login" />} />
             <Route path="/signup" element={<Auth mode="signup" />} />
             <Route path="/verify-email" element={<VerifyEmail />} />
+            {/* Landing hop for the Google redirect: the API sends the JWT in
+                the URL fragment, this page stores it and moves on. Public —
+                the visitor is not signed in until this page finishes. */}
+            <Route path="/auth/google/complete" element={<GoogleComplete />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
 

@@ -260,6 +260,23 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_starttls: bool = False
 
+    # ── Google OAuth ("Continue with Google") ────────────────────────
+    # Server-side authorization-code flow (src/google_oauth.py) — no OAuth
+    # SDK and no new dependency: urllib + hmac + json, the same shape as
+    # src/emails.py and src/redis_ratelimit.py. Create the client at
+    # console.cloud.google.com → APIs & Services → Credentials, then put
+    # the pair in .env (which is git-ignored, chmod 600).
+    #
+    #   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — the credential pair. Both
+    #     blank (the default) leaves everything as it was: the button sends
+    #     visitors to /login?oauth_error=unavailable.
+    #   GOOGLE_REDIRECT_URI — must equal the Authorized redirect URI in the
+    #     Google console CHARACTER FOR CHARACTER or the token exchange comes
+    #     back redirect_uri_mismatch. The default targets the local API.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+
     # ── Admin dashboard ──────────────────────────────────────────────
     # Comma-separated list of emails granted the admin role. The admin
     # role gates the /admin/* management API + dashboard (user management,
@@ -458,6 +475,18 @@ class Settings(BaseSettings):
     def has_jwt_secret(self) -> bool:
         """Check if JWT auth is configured (JWT_SECRET set)."""
         return bool(self.jwt_secret)
+
+    @property
+    def has_google_oauth(self) -> bool:
+        """Check if "Continue with Google" is configured (both halves of the pair).
+
+        Both are required. An id without a secret can open the consent
+        screen but can never exchange the returned code — the user would
+        approve access and then land on an error page, which is the worst
+        possible moment to fail. Checking one flag before the redirect
+        keeps that from ever happening.
+        """
+        return bool(self.google_client_id and self.google_client_secret)
 
     @property
     def mail_transport(self) -> str:
