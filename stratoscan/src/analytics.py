@@ -36,11 +36,15 @@ after a successful insert (see :func:`_fire_derived`). Identity is the
 ``user_id`` when there is one, else the browser's ``anon_id`` — which is what
 lets pre-signup activity join the signed-in funnel.
 
+This module also owns :func:`scrub`, the pure redactor applied to an exception
+trace before it is persisted (see ``src/api.py``'s generic handler). It lives
+here because it is the same concern: never store what you would not show.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
@@ -101,6 +105,51 @@ DERIVED_EVENTS: FrozenSet[str] = frozenset({
 #: Longest string prop value kept. Anything longer is dropped: fields that
 #: want to carry free text would otherwise become a PII channel by accident.
 MAX_STR_PROP_CHARS = 64
+
+#: Hard cap on a persisted trace (see :func:`scrub`).
+MAX_TRACE_CHARS = 8000
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# scrubbing (used before an exception trace is persisted)
+# ═══════════════════════════════════════════════════════════════════════════════
+# An exception trace is the one place where genuinely sensitive material shows
+# up by accident: a formatted query string, a URL with a token, an outbound
+# request header. These three patterns are the ones that actually appear in
+# this codebase (an email inside a database error, a JWT inside a malformed
+# auth error, a Bearer header echoed back by an HTTP client).
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+# JWT shape: three base64url segments, always starting ``eyJ`` (the base64 of
+# ``{"``) because every JWT begins with a JSON object header.
+_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_\-]*\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
+_BEARER_RE = re.compile(r"(?i)\bbearer\s+\S+")
+
+
+def scrub(text: str) -> str:
+    """Redact identifiers from a trace and cap its length.
+
+    Pure function: same input, same output, no I/O. Applied to
+    ``traceback.format_exception(...)`` output before it is written to
+    ``error_log`` (see ``src/api.py``'s generic handler).
+
+    Substitutions run before truncation on purpose — truncating first could
+    slice an email in half and leave ``alice@exa`` in the table, which is the
+    exact leak this exists to prevent.
+
+    Args:
+        text: Any string (a traceback, usually).
+
+    Returns:
+        The text with email addresses replaced by ``<email>``, JWT-shaped
+        strings by ``<jwt>`` and ``Bearer <anything>`` by
+        ``Bearer <redacted>``, truncated to :data:`MAX_TRACE_CHARS`.
+    """
+    if not text:
+        return ""
+    out = _EMAIL_RE.sub("<email>", text)
+    out = _JWT_RE.sub("<jwt>", out)
+    out = _BEARER_RE.sub("Bearer <redacted>", out)
+    return out[:MAX_TRACE_CHARS]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1638,6 +1638,52 @@
           }
         }
       }
+    },
+    "/admin/errors": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Recent unhandled errors, newest first \u2014 admin only",
+        "description": "What has been breaking, without shelling into the machine.\n\nOne row per unhandled exception: when, which method, the route TEMPLATE\n(never the raw URL \u2014 a query string can carry a token), the exception type\nand the scrubbed trace. Returns ``{count, errors}``; ``limit`` is clamped\nrather than validated into a 422, same as ``/admin/events``.",
+        "operationId": "admin_errors_admin_errors_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Admin Errors Admin Errors Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

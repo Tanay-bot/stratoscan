@@ -335,7 +335,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | GET | `/stocks/{symbol}` | — | single stock + sentiment |
 | POST | `/refresh` | admin | trigger a refresh cycle (admin-gated) |
 | GET | `/ops/jobs`, `/ops/jobs/{name}` | admin | job monitor (`require_admin` — NOT public) |
-| GET | `/admin/overview`, `/admin/users`, `/admin/jobs`, `/admin/events` | admin | admin API |
+| GET | `/admin/overview`, `/admin/users`, `/admin/jobs`, `/admin/events`, `/admin/errors` | admin | admin API (`/admin/events` = funnel read-out, `/admin/errors` = scrubbed `error_log`) |
 | PATCH | `/admin/users/{user_id}` | admin | update plan/admin/verified |
 | GET | `/admin` | admin | self-contained HTML dashboard (`admin_dashboard.py`) |
 
@@ -895,7 +895,9 @@ the flag is set.
 
 - **Error envelope** (via `http_exception_handler` / `generic_exception_handler`):
   `{error: true, detail: "...", status_code: N}` (+ `retry_after` on 429). Pydantic 422s are
-  NOT normalized — the frontend joins the `detail` array.
+  NOT normalized — the frontend joins the `detail` array. `generic_exception_handler` ALSO
+  writes one scrubbed `error_log` row (route TEMPLATE, exception type, redacted trace) — the
+  client's body is byte-for-byte unchanged, and a failed write leaves it unchanged too.
 - **Backtest is `query`-driven** (see §6 backtester gotcha). `symbol`, `strategy`,
   `initial_capital` are not request fields.
 - **Auth:** Bearer JWT (7-day TTL). `require_admin` gates `/admin/*` + `/refresh`.

@@ -4610,6 +4610,35 @@ async def admin_events(
 
 
 @app.get(
+    "/admin/errors",
+    response_model=Dict[str, Any],
+    summary="Recent unhandled errors, newest first — admin only",
+    tags=["Admin"],
+)
+async def admin_errors(
+    request: Request,
+    response: Response,
+    limit: int = 50,
+    admin: Dict[str, Any] = Depends(require_admin),
+):
+    """What has been breaking, without shelling into the machine.
+
+    One row per unhandled exception: when, which method, the route TEMPLATE
+    (never the raw URL — a query string can carry a token), the exception type
+    and the scrubbed trace. Returns ``{count, errors}``; ``limit`` is clamped
+    rather than validated into a 422, same as ``/admin/events``.
+    """
+    from src.database import PostgresDB
+
+    try:
+        errors = PostgresDB().list_errors(limit=max(1, min(int(limit), 200)))
+    except Exception as e:
+        logger.warning("Admin errors read failed: %s", e)
+        errors = []
+    return {"count": len(errors), "errors": errors}
+
+
+@app.get(
     "/admin",
     response_class=Response,
     summary="Admin dashboard (HTML)",
@@ -4649,10 +4678,64 @@ async def http_exception_handler(request, exc: HTTPException):
     )
 
 
+def _error_route_template(request) -> str:
+    """The route TEMPLATE that raised — never the raw URL.
+
+    ``/backtest/async/{job_id}``, not ``/backtest/async/bt_9f3a?token=…``. Two
+    reasons, and the second is the important one: a concrete path would make
+    every job id its own row in the error table, and a query string can carry a
+    credential. What an operator needs is "which endpoint keeps breaking".
+
+    Falls back to the bare path (query string stripped) when no route matched —
+    a 404 path, or an error raised before routing happened.
+    """
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    if template:
+        return template
+    return request.url.path
+
+
+def _capture_error(request, exc: Exception) -> None:
+    """Persist one unhandled exception to ``error_log``, scrubbed.
+
+    Never raises and never touches the response: the client still receives the
+    same generic 500 envelope it always did (golden rule #12 — no raw exception
+    text leaves the process), and a failure to WRITE the row must not turn one
+    500 into a different one. The trace is scrubbed by ``analytics.scrub``
+    (emails, JWTs, Bearer headers) and length-capped before it reaches the
+    table; request bodies and headers are never stored at all.
+    """
+    try:
+        import traceback
+
+        from src.analytics import scrub
+        from src.database import PostgresDB
+
+        trace = scrub(
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        )
+        PostgresDB().insert_error(
+            method=request.method,
+            route=_error_route_template(request),
+            error_type=type(exc).__name__,
+            trace=trace,
+        )
+    except Exception as write_failure:  # noqa: BLE001 — must never propagate
+        logger.warning("Could not persist error_log row: %s", write_failure)
+
+
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc: Exception):
-    """Catch-all error handler — returns 500 with the error message."""
+    """Catch-all error handler — logs, records, and returns a generic 500.
+
+    The client-facing body is unchanged from before Day 4 (a fixed detail
+    string, no exception text); what is new is the ``error_log`` row, which is
+    how "find out when something breaks" stops meaning "read the logs on the
+    machine".
+    """
     logger.exception("Unhandled exception: %s", exc)
+    _capture_error(request, exc)
     return JSONResponse(
         status_code=500,
         content={

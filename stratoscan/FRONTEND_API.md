@@ -382,10 +382,32 @@ The client renews its token while the user is active (tab focus, and a
 | PATCH | `/admin/users/{id}` | Update `plan` / `is_admin` / `email_verified` (partial) |
 | GET | `/admin/jobs` | Job-monitor summary |
 | GET | `/admin/events?limit=100` | Latest product events, newest first (`{count, events: [{name, occurred_at, anon_id, user_id, props}]}`) — how the funnel is walked |
+| GET | `/admin/errors?limit=50` | Latest unhandled errors, newest first (`{count, errors: [{occurred_at, method, route, error_type, trace}]}`) — `route` is the route TEMPLATE, `trace` is scrubbed |
 | GET | `/admin` | Self-contained HTML dashboard |
 
 `GET /ops/jobs` and `GET /ops/jobs/{job_name}` are admin-only too (job
 telemetry), while `POST /refresh` (admin) fires a full background data refresh.
+
+### What happens on an unhandled error
+
+The client's response is **unchanged** by Day 4: a 500 with the fixed envelope
+`{error: true, detail: "Internal server error. Please try again later.",
+status_code: 500}`. Raw exception text never leaves the process.
+
+What is new is that `generic_exception_handler` also writes one `error_log` row
+(server-side only, readable via `GET /admin/errors`):
+
+- `route` is the route **template** (`/backtest/async/{job_id}`), never the raw
+  URL — a query string can carry a token, and a concrete path would give every
+  job id its own row;
+- `error_type` is the exception class name (e.g. `ValueError`);
+- `trace` is `traceback.format_exception(...)` joined and then **scrubbed** by
+  `analytics.scrub()`: email addresses → `<email>`, JWT-shaped strings → `<jwt>`,
+  `Bearer …` → `Bearer <redacted>`, capped at 8,000 characters (substitutions
+  run before the cut, so a secret cannot survive as a half-redacted prefix).
+
+No request bodies and no headers are stored. A failure to write the row also
+changes nothing the client sees — the same 500 is returned either way.
 
 ---
 
