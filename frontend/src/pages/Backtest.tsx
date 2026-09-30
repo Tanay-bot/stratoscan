@@ -39,6 +39,7 @@ import {
 } from '@/components/StrategyBuilder'
 import { SplitPane } from '@/components/backtest/SplitPane'
 import { ChatPanel, type ChatMessage } from '@/components/backtest/ChatPanel'
+import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
 import {
   backtest,
@@ -747,6 +748,12 @@ export function Backtest() {
               ))}
             </div>
           )}
+
+          {/* Risk disclaimer: directly under the KPI cards, inside the result
+              block. The spec is explicit that it belongs next to the number,
+              in the same visual block, and not in 8pt grey at the bottom of
+              the page — a disclaimer nobody reads is not a disclaimer. */}
+          <RiskDisclaimer />
 
           {active && (
             <motion.div

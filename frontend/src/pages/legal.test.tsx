@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Terms } from './Terms'
 import { Privacy } from './Privacy'
+import { Risk } from './Risk'
 import { Footer } from '@/components/landing/Footer'
 
 // P2-4: legal pages. Terms must cover the standard clauses (acceptance,
@@ -74,6 +75,10 @@ describe('Privacy Policy', () => {
     )
     for (const heading of [
       'Data We Collect',
+      // Day 4: the section that has to be TRUE of what the product actually
+      // stores — account, saved content, anonymous events, scrubbed errors —
+      // and that names the one local identifier plainly.
+      'What We Store and How to Delete It',
       'How We Use Your Data',
       'Data Storage & Security',
       'Data Sharing',
@@ -86,6 +91,25 @@ describe('Privacy Policy', () => {
     ]) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
     }
+  })
+
+  it('describes what is stored and the one way to delete it', () => {
+    render(
+      <MemoryRouter>
+        <Privacy />
+      </MemoryRouter>,
+    )
+
+    // The local identifier, named rather than gestured at.
+    expect(screen.getAllByText(/stratoscan_anon_id/).length).toBeGreaterThan(0)
+    // The deletion path is the Settings page, and the section has to say what
+    // that action does — including that events are detached, not deleted.
+    expect(screen.getAllByText(/Settings → Delete account/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/revokes every session/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/no longer be tied to a person/i).length).toBeGreaterThan(0)
+    // And the claim that makes Parts A and B survivable: no query text is
+    // stored as an event.
+    expect(screen.getAllByText(/never/).length).toBeGreaterThan(0)
   })
 
   it('states the no-sale commitment explicitly', () => {
@@ -105,8 +129,50 @@ describe('Privacy Policy', () => {
   })
 })
 
+describe('Risk Disclaimer', () => {
+  it('renders the title and last-updated stamp', () => {
+    render(
+      <MemoryRouter>
+        <Risk />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('heading', { name: 'Risk Disclaimer' })).toBeInTheDocument()
+    expect(screen.getByText(/last updated:/i)).toBeInTheDocument()
+  })
+
+  it('covers what a backtest is and is not', () => {
+    render(
+      <MemoryRouter>
+        <Risk />
+      </MemoryRouter>,
+    )
+    for (const heading of [
+      'What a Backtest Actually Is',
+      // The two structural biases that make a backtest look better than it is.
+      'Survivorship Bias',
+      'Look-Ahead and Data Limits',
+      // Data honesty, then the two claims that keep this a research tool.
+      'The Data Can Be Wrong or Stale',
+      'Not Investment Advice',
+      'Your Decisions Are Yours',
+    ]) {
+      expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument()
+    }
+  })
+
+  it('exposes the shared legal shell (skip-to-content target + TOC)', () => {
+    render(
+      <MemoryRouter>
+        <Risk />
+      </MemoryRouter>,
+    )
+    expect(document.getElementById('main-content')?.getAttribute('tabindex')).toBe('-1')
+    expect(screen.getByRole('navigation', { name: 'On this page' })).toBeInTheDocument()
+  })
+})
+
 describe('legal links', () => {
-  it('Footer Legal column links to real /terms and /privacy routes', () => {
+  it('Footer Legal column links to real /terms, /privacy and /risk routes', () => {
     render(
       <MemoryRouter>
         <Footer />
@@ -114,7 +180,9 @@ describe('legal links', () => {
     )
     const terms = screen.getByRole('link', { name: 'Terms of Service' })
     const privacy = screen.getByRole('link', { name: 'Privacy Policy' })
+    const risk = screen.getByRole('link', { name: 'Risk Disclaimer' })
     expect(terms).toHaveAttribute('href', '/terms')
     expect(privacy).toHaveAttribute('href', '/privacy')
+    expect(risk).toHaveAttribute('href', '/risk')
   })
 })

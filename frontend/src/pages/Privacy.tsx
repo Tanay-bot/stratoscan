@@ -22,8 +22,15 @@ const SECTIONS = [
             settings stored in your browser on your device.
           </li>
           <li>
-            <strong className="text-text-hi">Usage data</strong> — anonymized logs of page views,
-            feature usage, and API calls, used to operate and improve the Service.
+            <strong className="text-text-hi">Usage events</strong> — anonymous records of what the
+            product did (a page was viewed, a screen was submitted, a backtest was run, which
+            surface was used) stored in our own database. The text of your query is{' '}
+            <strong className="text-text-hi">never</strong> recorded as an event: not in the event
+            itself, not in our error logs. See{' '}
+            <a href="#what-we-store" className="text-neon transition-opacity hover:opacity-80">
+              What we store and how to delete it
+            </a>
+            .
           </li>
           <li>
             <strong className="text-text-hi">Device &amp; technical data</strong> — browser type,
@@ -34,6 +41,62 @@ const SECTIONS = [
         <p>
           We do <em>not</em> collect your brokerage credentials, trades, or portfolio, and we never
           require financial information to use the Service.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'what-we-store',
+    title: 'What We Store and How to Delete It',
+    body: (
+      <>
+        <p>Short version: your account, the things you chose to save, and anonymous counters.</p>
+        <ul>
+          <li>
+            <strong className="text-text-hi">Your account</strong> — the email address you signed up
+            with and a PBKDF2 hash of your password. We never store the password itself, and we
+            cannot read it.
+          </li>
+          <li>
+            <strong className="text-text-hi">What you saved</strong> — your watchlist, saved
+            screeners, and recent backtest runs, so they follow you to another device. This is the
+            only place the text of your queries is stored, because a saved screen is the query.
+          </li>
+          <li>
+            <strong className="text-text-hi">Anonymous usage events</strong> — that a landing page
+            was viewed, a screener or backtest was submitted, a result was shared, how many results
+            came back, how long a backtest took. These carry no query text, no email address, no
+            symbol list and no error detail, and they are tied either to your account id or to a
+            random identifier stored in your browser (
+            <code className="text-text-hi">stratoscan_anon_id</code>) if you have not signed up.
+            That identifier is a random UUID in local storage — not a cookie, not shared with
+            anyone, and gone when you clear your browser data.
+          </li>
+          <li>
+            <strong className="text-text-hi">Error reports</strong> — when something breaks, we
+            record the failing route, the exception type and a traceback with email addresses,
+            tokens and authorization headers redacted. Never request bodies. Never headers.
+          </li>
+        </ul>
+        <p>
+          <strong className="text-text-hi">How to delete it:</strong> open{' '}
+          <strong className="text-text-hi">Settings → Delete account</strong> and confirm with your
+          password. That single action:
+        </p>
+        <ul>
+          <li>deletes the account and everything saved to it (watchlist, screens, backtests);</li>
+          <li>revokes every session, on every device, immediately;</li>
+          <li>
+            leaves your anonymous usage events in place but detaches them from you — the account
+            link is cleared, so they can no longer be tied to a person. We keep the counters because
+            deleting them would silently rewrite the numbers other users&rsquo; decisions were based
+            on, and because after detachment there is nothing personal left in them.
+          </li>
+        </ul>
+        <p>
+          You can also just email us through the Contact page and we will do it for you. There is no
+          cookie banner on this site because there is no third-party analytics or advertising tool
+          to consent to: the one identifier we use is the local UUID described above.
         </p>
       </>
     ),
@@ -163,8 +226,15 @@ const SECTIONS = [
             saved screener drafts and UI choices.
           </li>
           <li>
-            <strong className="text-text-hi">Analytics &amp; error monitoring</strong> — anonymized
-            usage and crash data (e.g., Sentry).
+            <strong className="text-text-hi">Anonymous identifier</strong> — a random UUID stored
+            under <code className="text-text-hi">stratoscan_anon_id</code>, used to count visits and
+            to connect the activity of a visitor who later signs up. It identifies a browser, not a
+            person, and it is never sent to a third party.
+          </li>
+          <li>
+            <strong className="text-text-hi">Error monitoring</strong> — crash diagnostics from the
+            frontend (e.g., Sentry), used to fix bugs. This is error reporting, not behavioural
+            analytics: there is no profile of what you browse.
           </li>
         </ul>
         <p>
@@ -236,7 +306,7 @@ export function Privacy() {
       eyebrow="Legal"
       title="Privacy Policy"
       intro="How Stratoscan collects, uses, and protects your data. Short version: we collect as little as possible, and we never sell it."
-      lastUpdated="August 6, 2026"
+      lastUpdated="September 29, 2026"
       sections={SECTIONS}
     />
   )
