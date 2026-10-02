@@ -84,6 +84,13 @@ const PUBLIC: RouteMeta[] = [
     noindex: false,
   },
   {
+    path: '/risk',
+    title: 'Risk Disclaimer — Stratoscan',
+    description:
+      'What a backtest can and cannot tell you: survivorship bias, look-ahead limits, data that can be stale, and why a simulated result is not investment advice.',
+    noindex: false,
+  },
+  {
     path: '/login',
     title: 'Log In — Stratoscan',
     description:

@@ -20,6 +20,7 @@ const Pricing = lazy(() => import('@/pages/Pricing').then((m) => ({ default: m.P
 const Contact = lazy(() => import('@/pages/Contact').then((m) => ({ default: m.Contact })))
 const Terms = lazy(() => import('@/pages/Terms').then((m) => ({ default: m.Terms })))
 const Privacy = lazy(() => import('@/pages/Privacy').then((m) => ({ default: m.Privacy })))
+const Risk = lazy(() => import('@/pages/Risk').then((m) => ({ default: m.Risk })))
 const Auth = lazy(() => import('@/pages/Auth').then((m) => ({ default: m.Auth })))
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((m) => ({ default: m.Dashboard })))
 const Screener = lazy(() => import('@/pages/Screener').then((m) => ({ default: m.Screener })))
@@ -95,6 +96,7 @@ export default function App() {
             <Route path="/contact" element={<Contact />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/risk" element={<Risk />} />
             <Route path="/login" element={<Auth mode="login" />} />
             <Route path="/signup" element={<Auth mode="signup" />} />
             <Route path="/verify-email" element={<VerifyEmail />} />

@@ -124,7 +124,7 @@ editing anything.**
 │  │        PostgreSQL — THREE dedicated Neon projects     │  │
 │  │  • main:    stock_master, users, job_runs,            │  │
 │  │            scheduler_heartbeat, user_data,            │  │
-│  │            backtest_jobs                              │  │
+│  │            backtest_jobs, events, error_log           │  │
 │  │  • backtest: historical_prices, backtest_results      │  │
 │  │  • news:    stock_sentiment, news_articles            │  │
 │  └───────────────────────────────────────────────────────┘  │
@@ -322,6 +322,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/auth/delete-account` | Bearer | password re-entry; deletes user + `user_data` (cascade) + `backtest_jobs` (no FK — explicit) in one tx |
 | POST | `/screen` | — | NL query → ranked, paginated stocks (60s cache) |
 | POST | `/interpret` | — | debug: NL query → filters only |
+| POST | `/events` | — | browser event ingest (`src/analytics.py`); client allowlist, **400** for a server-only name; always 204 |
 | POST | `/backtest` | Bearer | full backtest (20-min frontend timeout) |
 | POST | `/backtest/async` | Bearer | start job → `job_id` |
 | GET | `/backtest/async/{job_id}` | Bearer | poll progress/result |
@@ -334,7 +335,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | GET | `/stocks/{symbol}` | — | single stock + sentiment |
 | POST | `/refresh` | admin | trigger a refresh cycle (admin-gated) |
 | GET | `/ops/jobs`, `/ops/jobs/{name}` | admin | job monitor (`require_admin` — NOT public) |
-| GET | `/admin/overview`, `/admin/users`, `/admin/jobs` | admin | admin API |
+| GET | `/admin/overview`, `/admin/users`, `/admin/jobs`, `/admin/events`, `/admin/errors` | admin | admin API (`/admin/events` = funnel read-out, `/admin/errors` = scrubbed `error_log`) |
 | PATCH | `/admin/users/{user_id}` | admin | update plan/admin/verified |
 | GET | `/admin` | admin | self-contained HTML dashboard (`admin_dashboard.py`) |
 
@@ -476,6 +477,10 @@ symbol in the query text.
   `close`. (SQLiteDB mirrors this contract with an extra `connect()`.)
 - **SQLiteDB** — dev/test-only fallback mirroring the same storage contract.
 - `coverage_gap_columns(counts, min_pct=50)` — pure function used by the screener gate.
+- Event/error surface: `insert_event` / `count_events` / `first_event_at` / `has_event` /
+  `list_events` and `insert_error` / `list_errors`, plus the module-level
+  `_event_identity_where(user_id, anon_id)` — the ONE definition of "this person"
+  (user_id when set, else anon_id) shared with `src/analytics.py`.
 - Schemas, backfills (`STOCK_MASTER_COLUMN_BACKFILL`, `USERS_EMAIL_VERIFICATION_BACKFILL`)
   and `MARKET_CAP_SANITY_SWEEP` live here as constants (see §7).
 
@@ -560,6 +565,24 @@ Return **copies** of cached values where callers can mutate (interpreted queries
 (`ALERT_WEBHOOK_MIN_INTERVAL_SECONDS`, default 900s); silent degradation (never raises);
 no-op when `alerts_enabled` is false.
 
+### `src/analytics.py` — the ONE event entry point
+
+`EVENTS` (event name → the ONLY prop keys it may carry), `CLIENT_EVENTS` (the five the browser
+may POST), `DERIVED_EVENTS`, `track(name, *, user_id, anon_id, props)`, `recent_events(limit)`,
+and `scrub(text)`. 16 event names (the plan's fifteen rows: `returned_day_2`/`returned_day_7`
+are two).
+
+`track()` never raises (the whole body is wrapped — telemetry must not break a screen or a
+signup), drops unknown names with a warning, keeps only whitelisted props with scalar values
+(strings ≤ 64 chars), accepts `anon_id` only when `uuid.UUID()` parses it, and is a no-op when
+`settings.analytics_enabled` is False. After a successful insert it computes the derived
+events for the identity (`user_id`, else `anon_id`; neither → nothing): `second_backtest` when
+a `backtest_completed` makes the count exactly 2, `returned_day_2` / `returned_day_7` by UTC
+**calendar** date (1 day, and 6–8 days) each at most once. `scrub()` is pure: emails →
+`<email>`, `eyJ…`-shaped tokens → `<jwt>`, `Bearer …` → `Bearer <redacted>`, capped at 8,000
+chars (substitutes BEFORE truncating, so a sliced email can't survive). All DB access goes
+through the module-level `_db()` seam, which is what tests patch.
+
 ### `src/metrics.py` — Prometheus exporter (stdlib)
 
 `MetricsMiddleware` (records method/route-template/status + latency histogram) + `registry`
@@ -621,6 +644,8 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 | `scheduler_heartbeat` | `id` (=1) PK, `last_beat_at`, `pid` | Single-row liveness beacon. |
 | `backtest_jobs` | `job_id` PK, `user_email`, `query`, `status` ('queued'/'running'/'done'/'error'/'interrupted'), `phase`, `done_symbols` JSONB, `total_symbols`, `result` JSONB, `error`, timestamps | Async backtest durability; orphans marked 'interrupted' on restart. |
 | `user_data` | `user_id` PK FK users ON DELETE CASCADE, `watchlist` JSONB, `saved_screeners` JSONB, `recent_backtests` JSONB, `updated_at` | Per-user saved state synced from frontend. |
+| `events` | `id`, `name`, `occurred_at` TIMESTAMPTZ, `anon_id`, `user_id` FK users ON DELETE SET NULL, `props` JSONB | The product funnel (Day 4). Written ONLY by `src/analytics.track()`; the per-event prop whitelist lives in `EVENTS` there — no query text, email, symbol list or exception message is ever stored. `user_id` is SET NULL on account deletion, so deleting an account anonymises its events instead of deleting history. |
+| `error_log` | `id`, `occurred_at` TIMESTAMPTZ, `method`, `route` (template), `error_type`, `trace` | One row per unhandled exception, written by `generic_exception_handler`. `route` is the route TEMPLATE, never the raw URL (which can carry a token); `trace` is scrubbed by `analytics.scrub()` (emails → `<email>`, JWTs → `<jwt>`, `Bearer …` → `Bearer <redacted>`, capped at 8,000 chars). No bodies, no headers. |
 
 ### Backtest DB (`BACKTEST_DATABASE_URL`) — also exists as SQLite (`data/backtest_history.db`) in dev
 
@@ -870,7 +895,9 @@ the flag is set.
 
 - **Error envelope** (via `http_exception_handler` / `generic_exception_handler`):
   `{error: true, detail: "...", status_code: N}` (+ `retry_after` on 429). Pydantic 422s are
-  NOT normalized — the frontend joins the `detail` array.
+  NOT normalized — the frontend joins the `detail` array. `generic_exception_handler` ALSO
+  writes one scrubbed `error_log` row (route TEMPLATE, exception type, redacted trace) — the
+  client's body is byte-for-byte unchanged, and a failed write leaves it unchanged too.
 - **Backtest is `query`-driven** (see §6 backtester gotcha). `symbol`, `strategy`,
   `initial_capital` are not request fields.
 - **Auth:** Bearer JWT (7-day TTL). `require_admin` gates `/admin/*` + `/refresh`.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -11,6 +11,7 @@ import { Logo } from '@/components/Logo'
 import { useAuth } from '@/store/auth'
 import { toast } from '@/store/notifications'
 import { API_ORIGIN, DEMO_MODE } from '@/lib/api/client'
+import { track } from '@/lib/analytics'
 import { cn } from '@/lib/utils'
 
 /**
@@ -100,6 +101,19 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
     form.reset({ email: '', password: '', confirm: '' })
     form.clearErrors()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode])
+
+  // "Started signup" is the step between arriving and registering, and it is
+  // what tells you whether the FORM is the problem or everything before it.
+  // Fires once per visit, from either entry point: landing on /signup, or
+  // switching the tab to Sign up. `method` records only which door was chosen
+  // — password here, Google on the button below — never an address.
+  const signupTracked = useRef(false)
+  useEffect(() => {
+    if (mode === 'signup' && !signupTracked.current) {
+      signupTracked.current = true
+      track('signup_started', { method: 'password' })
+    }
   }, [mode])
 
   const onSubmit = async (values: AuthValues) => {
@@ -212,6 +226,9 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
                 <>
                   <a
                     href={`${API_ORIGIN}/auth/google/start`}
+                    // The click leaves the page immediately; `track` uses
+                    // keepalive so the event survives the navigation.
+                    onClick={() => track('signup_started', { method: 'google' })}
                     className={cn(buttonVariants({ variant: 'secondary' }), 'w-full')}
                   >
                     <GoogleMark />

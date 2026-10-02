@@ -12,6 +12,7 @@ import { CountUp } from '@/components/landing/CountUp'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/store/auth'
 import { DEMO_MODE } from '@/lib/api/client'
+import { track } from '@/lib/analytics'
 import { useToasts } from '@/store/notifications'
 import { useRegisterSearchInput } from '@/hooks/useKeyboardShortcuts'
 
@@ -95,6 +96,13 @@ export function Landing() {
   const [edited, setEdited] = useState(false)
   const { text: auto, full } = useRotatingPrompts(SEARCH_PROMPTS, !focused && !edited)
   const shown = edited ? query : focused ? '' : auto
+
+  // The top of the funnel. Mount-only (""), not on every re-render: this is
+  // the denominator for every other event, so it must count visits and not
+  // the interactions that happen during one.
+  useEffect(() => {
+    track('landing_view')
+  }, [])
 
   const runSearch = (q: string) => {
     const trimmed = q.trim()
@@ -236,10 +244,16 @@ export function Landing() {
                 <span className="text-2xs font-medium uppercase tracking-wider text-text-low">
                   Try
                 </span>
-                {EXAMPLES.map((ex) => (
+                {EXAMPLES.map((ex, i) => (
                   <button
                     key={ex}
-                    onClick={() => runSearch(ex)}
+                    onClick={() => {
+                      // Identified by position, never by text: the query the
+                      // user sends is theirs, the chip is ours. Indexes here
+                      // are stable because the list is a module constant.
+                      track('template_used', { template: `landing-example-${i}` })
+                      runSearch(ex)
+                    }}
                     className="glass-hover rounded-full px-3.5 py-1.5 text-xs text-text-mid"
                   >
                     {ex}

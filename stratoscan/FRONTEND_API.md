@@ -249,6 +249,28 @@ user's watchlist and saved screeners follow them across devices.
 ### `GET /config` — service configuration + warnings
 `{finnhub_key_count, screener_llm_configured, backtest_llm_configured, database_configured, warnings: []}`.
 
+### `POST /events` — browser analytics (fire-and-forget, no response body)
+
+Body `{name, props?}`; always `204` for an allowed name. The frontend calls this
+from `lib/analytics.ts` (`track()`), which never waits for it and swallows every
+failure — an event that does not arrive is not the user's problem.
+
+- `name` must be one of the five **client-reportable** events: `landing_view`,
+  `query_submitted` (`{surface}`), `template_used` (`{template}`, the chip's id,
+  never its text), `result_shared`, `signup_started` (`{method}`). A server-only
+  name (`backtest_completed`, `second_backtest`, …) is refused with **`400`** and
+  writes nothing: those events are derived from real work, and accepting them
+  from a browser would let a script forge the funnel.
+- `X-Anon-Id` header (optional) — the browser's `stratoscan_anon_id` UUID. Not a
+  UUID → stored as NULL. It is what joins pre-signup activity to the account the
+  visitor becomes. Every axios call sends it too (`client.ts` interceptor).
+- `Authorization: Bearer …` (optional) — attributes the event to the account.
+  **Never 401s**: a missing or malformed token just means no `user_id`.
+- Props are filtered server-side against a per-event allowlist. Unknown keys,
+  non-scalar values, and strings over 64 characters are dropped. No query text,
+  email, symbol list or exception message is ever stored.
+- Rate limit: the default `read` scope (no dedicated bucket).
+
 ---
 
 ## 5. Auth endpoints
@@ -359,10 +381,33 @@ The client renews its token while the user is active (tab focus, and a
 | GET | `/admin/users?limit&offset&search` | Paginated user list (`{total, limit, offset, users}`) |
 | PATCH | `/admin/users/{id}` | Update `plan` / `is_admin` / `email_verified` (partial) |
 | GET | `/admin/jobs` | Job-monitor summary |
+| GET | `/admin/events?limit=100` | Latest product events, newest first (`{count, events: [{name, occurred_at, anon_id, user_id, props}]}`) — how the funnel is walked |
+| GET | `/admin/errors?limit=50` | Latest unhandled errors, newest first (`{count, errors: [{occurred_at, method, route, error_type, trace}]}`) — `route` is the route TEMPLATE, `trace` is scrubbed |
 | GET | `/admin` | Self-contained HTML dashboard |
 
 `GET /ops/jobs` and `GET /ops/jobs/{job_name}` are admin-only too (job
 telemetry), while `POST /refresh` (admin) fires a full background data refresh.
+
+### What happens on an unhandled error
+
+The client's response is **unchanged** by Day 4: a 500 with the fixed envelope
+`{error: true, detail: "Internal server error. Please try again later.",
+status_code: 500}`. Raw exception text never leaves the process.
+
+What is new is that `generic_exception_handler` also writes one `error_log` row
+(server-side only, readable via `GET /admin/errors`):
+
+- `route` is the route **template** (`/backtest/async/{job_id}`), never the raw
+  URL — a query string can carry a token, and a concrete path would give every
+  job id its own row;
+- `error_type` is the exception class name (e.g. `ValueError`);
+- `trace` is `traceback.format_exception(...)` joined and then **scrubbed** by
+  `analytics.scrub()`: email addresses → `<email>`, JWT-shaped strings → `<jwt>`,
+  `Bearer …` → `Bearer <redacted>`, capped at 8,000 characters (substitutions
+  run before the cut, so a secret cannot survive as a half-redacted prefix).
+
+No request bodies and no headers are stored. A failure to write the row also
+changes nothing the client sees — the same 500 is returned either way.
 
 ---
 

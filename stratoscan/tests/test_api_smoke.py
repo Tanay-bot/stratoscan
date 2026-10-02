@@ -53,6 +53,9 @@ expected = {
     "/admin", "/admin/overview", "/admin/users", "/admin/users/{user_id}", "/admin/jobs",
     "/metrics",
     "/", "/meta", "/meta/sectors", "/meta/industries",
+    "/events",
+    "/admin/events",
+    "/admin/errors",
 }
 assert expected == routes, f"Routes mismatch. Missing: {expected - routes}. Extra: {routes - expected}"
 print(f"✅ Routes: {len(routes)} registered — {sorted(routes)}")

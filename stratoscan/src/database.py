@@ -598,6 +598,81 @@ CREATE TABLE IF NOT EXISTS user_data (
 );
 """
 
+# ── PostgreSQL (main DB): events table ──────────────────────────────
+# The product funnel (src/analytics.py). One row per event; every event the
+# app records goes through ``analytics.track()``, so the vocabulary lives in
+# that module (``EVENTS`` / ``CLIENT_EVENTS``) and never in a route.
+#
+# ``user_id`` is ON DELETE SET NULL on purpose: deleting an account (Day 3,
+# POST /auth/delete-account) must ANONYMISE its events rather than remove
+# them. The row is not personal data once it is detached from the user, and
+# dropping the rows would silently rewrite history — yesterday's funnel count
+# would change because someone left today.
+EVENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS events (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    anon_id     TEXT,
+    user_id     BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    props       JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+"""
+
+EVENTS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_events_name_time "
+    "ON events (name, occurred_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_events_user ON events (user_id);",
+    "CREATE INDEX IF NOT EXISTS idx_events_anon ON events (anon_id);",
+]
+
+# ── PostgreSQL (main DB): error_log table ───────────────────────────
+# One row per unhandled exception (src/api.py's generic_exception_handler).
+# ``route`` is the route TEMPLATE (``/backtest/async/{job_id}``), never the
+# raw URL — a raw URL can carry a token in its query string, and this table is
+# read by an operator through the admin API.
+#
+# ``trace`` is ``traceback.format_exception(...)`` joined and then passed
+# through ``analytics.scrub()`` (emails, JWTs, Bearer headers redacted, length
+# capped). No request bodies and no headers are stored, ever.
+ERROR_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS error_log (
+    id          BIGSERIAL PRIMARY KEY,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    method      TEXT,
+    route       TEXT,
+    error_type  TEXT,
+    trace       TEXT
+);
+"""
+
+ERROR_LOG_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_error_log_time "
+    "ON error_log (occurred_at DESC);",
+]
+
+
+def _event_identity_where(
+    user_id: Optional[int], anon_id: Optional[str]
+) -> Tuple[Optional[str], List[Any]]:
+    """Build the identity predicate shared by the funnel queries.
+
+    Identity is the ``user_id`` when set, else the ``anon_id`` — the same rule
+    ``src.analytics`` applies when it derives ``second_backtest`` /
+    ``returned_day_*``, kept here as one owner so the two can never disagree
+    about what "this person" means.
+
+    Returns:
+        ``(where_fragment, params)`` or ``(None, [])`` when there is no
+        identity — callers must treat None as "zero rows", never as "all
+        rows".
+    """
+    if user_id is not None:
+        return "user_id = %s", [user_id]
+    if anon_id:
+        return "anon_id = %s", [anon_id]
+    return None, []
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PostgreSQL Client (Screener)
@@ -707,8 +782,20 @@ class PostgresDB:
                 cur.execute(BACKTEST_JOBS_SCHEMA)
                 for idx in BACKTEST_JOBS_INDEXES:
                     cur.execute(idx)
+                # events + error_log come LAST: ``events.user_id`` references
+                # users(id), so the users table must already exist in this
+                # same transaction or the CREATE fails.
+                cur.execute(EVENTS_SCHEMA)
+                for idx in EVENTS_INDEXES:
+                    cur.execute(idx)
+                cur.execute(ERROR_LOG_SCHEMA)
+                for idx in ERROR_LOG_INDEXES:
+                    cur.execute(idx)
             conn.commit()
-        logger.info("PostgreSQL stock_master + users + job monitoring + backtest_jobs schema initialized")
+        logger.info(
+            "PostgreSQL stock_master + users + job monitoring + backtest_jobs "
+            "+ events + error_log schema initialized"
+        )
 
     # ── User CRUD (auth) ──────────────────────────────────────────────
 
@@ -1380,6 +1467,136 @@ class PostgresDB:
                 )
             conn.commit()
         logger.debug("Saved user_data for user %d", user_id)
+
+    # ── Product events (src/analytics.py) ─────────────────────────────
+
+    def insert_event(
+        self,
+        name: str,
+        user_id: Optional[int] = None,
+        anon_id: Optional[str] = None,
+        props: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Append one event row.
+
+        Called only by ``src.analytics.track`` — routes never insert directly,
+        so the prop whitelist in that module is impossible to bypass.
+
+        Args:
+            name: Event name (already validated against ``analytics.EVENTS``).
+            user_id: Signed-in user's id, or None for an anonymous visitor.
+            anon_id: The browser's UUID, or None.
+            props: Already-sanitised props (JSONB).
+        """
+        sql = (
+            "INSERT INTO events (name, user_id, anon_id, props) "
+            "VALUES (%s, %s, %s, %s)"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql,
+                    (name, user_id, anon_id,
+                     psycopg2.extras.Json(props or {})),
+                )
+            conn.commit()
+
+    def count_events(
+        self,
+        name: str,
+        user_id: Optional[int] = None,
+        anon_id: Optional[str] = None,
+    ) -> int:
+        """How many events of ``name`` this identity has, or 0 with no identity."""
+        where, params = _event_identity_where(user_id, anon_id)
+        if where is None:
+            return 0
+        sql = f"SELECT COUNT(*) FROM events WHERE name = %s AND {where}"
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (name, *params))
+                return int(cur.fetchone()[0] or 0)
+
+    def first_event_at(
+        self,
+        user_id: Optional[int] = None,
+        anon_id: Optional[str] = None,
+    ) -> Optional[Any]:
+        """When this identity's earliest event happened (None if none/no identity).
+
+        The anchor for the ``returned_day_2`` / ``returned_day_7`` derivations.
+        """
+        where, params = _event_identity_where(user_id, anon_id)
+        if where is None:
+            return None
+        sql = f"SELECT MIN(occurred_at) FROM events WHERE {where}"
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, tuple(params))
+                row = cur.fetchone()
+        return row[0] if row else None
+
+    def has_event(
+        self,
+        name: str,
+        user_id: Optional[int] = None,
+        anon_id: Optional[str] = None,
+    ) -> bool:
+        """Whether this identity already has an event of ``name`` (once-only guard)."""
+        where, params = _event_identity_where(user_id, anon_id)
+        if where is None:
+            return False
+        sql = f"SELECT 1 FROM events WHERE name = %s AND {where} LIMIT 1"
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (name, *params))
+                return cur.fetchone() is not None
+
+    def list_events(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Newest events first — the admin funnel read-out.
+
+        Ordered by ``(occurred_at, id)`` descending so two events written in
+        the same transaction still come back in insertion order, which is what
+        makes "paste the event names in order" meaningful.
+        """
+        sql = (
+            "SELECT name, occurred_at, anon_id, user_id, props "
+            "FROM events ORDER BY occurred_at DESC, id DESC LIMIT %s"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (int(limit),))
+                return [dict(r) for r in cur.fetchall()]
+
+    # ── Error log (src/api.py generic handler) ────────────────────────
+
+    def insert_error(
+        self,
+        method: str,
+        route: str,
+        error_type: str,
+        trace: str,
+    ) -> None:
+        """Append one unhandled-exception row (already scrubbed by the caller)."""
+        sql = (
+            "INSERT INTO error_log (method, route, error_type, trace) "
+            "VALUES (%s, %s, %s, %s)"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (method, route, error_type, trace))
+            conn.commit()
+
+    def list_errors(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Newest errors first (admin read-out)."""
+        sql = (
+            "SELECT occurred_at, method, route, error_type, trace "
+            "FROM error_log ORDER BY occurred_at DESC, id DESC LIMIT %s"
+        )
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, (int(limit),))
+                return [dict(r) for r in cur.fetchall()]
 
     def upsert_stock(self, record: Dict[str, Any]) -> None:
         """Insert or update a single stock record.

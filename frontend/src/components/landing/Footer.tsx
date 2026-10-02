@@ -26,6 +26,10 @@ const COLUMNS: { title: string; links: { label: string; to: string }[] }[] = [
     links: [
       { label: 'Terms of Service', to: '/terms' },
       { label: 'Privacy Policy', to: '/privacy' },
+      // The disclaimer is a first-class page, not a line of grey text: a
+      // product that touches investment decisions has to say what a backtest
+      // is and is not, somewhere a visitor can actually find it.
+      { label: 'Risk Disclaimer', to: '/risk' },
     ],
   },
 ]
