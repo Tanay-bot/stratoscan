@@ -424,7 +424,7 @@ ratelimit-reset: 1785946800
 
 Budgets (per scope, from `/meta`): `screen 5/min · 50/day`,
 `interpret 10/min · 100/day`, `enrich 3/min · 20/day`,
-`backtest 2/min · 10/day`, `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
+`backtest 2/min · 10/day` (starting a job), `backtest_poll 120/min` (`GET /backtest/async/{job_id}` — polling never spends the backtest budget), `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
 `auth 10/min · 50/day`, `register 3/min · 10/day`, `auth_mail 3/min · 10/day`
 (`/auth/password-reset/*`, `/auth/resend-verification`). Global shared buckets additionally cap usage
 across all users (`screener_llm` 900/day, `backtest_llm` 200/day, and

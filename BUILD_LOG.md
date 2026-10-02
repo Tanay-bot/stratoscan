@@ -3,6 +3,18 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 4 — Instrumentation and the legal floor
+
+**Shipped (Freebuff, reviewed):** the plan's fifteen funnel events through one `track()`, with
+a per-event whitelist that makes storing query text or emails impossible; browser can only
+send the five client events; scrubbed error capture; risk disclaimer inside the result block,
+a `/risk` page, and a privacy section on what's stored and how to delete it. 49/49, 240/240.
+
+**Broke / found:** polling a running backtest counted against the backtest cost shield — with
+rate limiting on (production; staging has it off, so no probe ever saw it) the third poll of
+every job was a 429, and polls drained the user's 10/day and the planet-wide backtest bucket.
+Polls now have their own free scope.
+
 ## Day 3 — Authentication, completely
 
 **Shipped:** revocable sessions (`token_version`, log out everywhere); password reset with

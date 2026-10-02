@@ -797,7 +797,8 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
    | `screen` | 5 | 50 | 250 | `/screen` |
    | `interpret` | 10 | 100 | 500 | `/interpret` |
    | `enrich` | 3 | 20 | 100 | `/enrich` |
-   | `backtest` | 2 | 10 | 50 | `/backtest*` |
+   | `backtest` | 2 | 10 | 50 | `/backtest`, `/backtest/async` (start), `/backtest/export` |
+   | `backtest_poll` | 120 | 10,000 | 50,000 | `GET /backtest/async/{job_id}` — free status reads; no global bucket |
    | `refresh` | 1 | 10 | 50 | `/refresh` |
    | `auth` | 10 | 50 | 350 | `/auth/*` except register and the email-sending routes |
    | `register` | 3 | 10 | 30 | `/auth/register` (SendGrid cost shield) |

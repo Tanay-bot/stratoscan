@@ -141,6 +141,10 @@ RATE_LIMITS = {
     # vice versa. Resend used to sit in the generic auth bucket: 50 emails a
     # day per IP, outside the planet-wide budget below.
     "auth_mail": {"burst": 3,   "daily": 10,    "weekly": 30},
+    # Job-status polls (see _scope_for_path). Generous because they are free,
+    # but still capped per IP so a runaway client can't hammer the DB; feeds
+    # no global bucket — there is no shared budget for them to protect.
+    "backtest_poll": {"burst": 120, "daily": 10000, "weekly": 50000},
 }
 
 # Global aggregates (ALL users share one bucket, enforced in the same batch
@@ -187,6 +191,14 @@ def _scope_for_path(path: str) -> str:
         ("/screen", "screen"),
         ("/interpret", "interpret"),
         ("/enrich", "enrich"),
+        # Polling a running job (GET /backtest/async/{job_id}) reads one
+        # in-memory dict entry or one DB row — no LLM, no download. It must
+        # NOT spend the backtest cost shield: the UI polls every 1.5s, so under
+        # the 2/min backtest burst the third poll of every job 429'd, and each
+        # poll also drew down the user's 10/day backtests and the planet-wide
+        # backtest_llm bucket. Matched before "/backtest"; starting a job
+        # (POST /backtest/async, no trailing segment) stays in "backtest".
+        ("/backtest/async/", "backtest_poll"),
         ("/backtest", "backtest"),
         ("/refresh", "refresh"),
         # VULN-002/003 fix: /auth/register must be matched BEFORE the generic

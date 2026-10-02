@@ -70,6 +70,9 @@ assert RATE_LIMITS == {
     # Day 3: every other email-sending auth action (password reset,
     # resend-verification) gets register's caps in its own scope.
     "auth_mail": {"burst": 3,   "daily": 10,    "weekly": 30},
+    # Polling a running backtest is free work, so it has its own generous
+    # scope and must never spend the backtest cost shield.
+    "backtest_poll": {"burst": 120, "daily": 10000, "weekly": 50000},
 }, f"RATE_LIMITS drifted: {RATE_LIMITS}"
 assert GLOBAL_LIMITS == {
     "screener_llm": 900,
@@ -99,6 +102,9 @@ scope_checks = {
     "/interpret": "interpret",
     "/enrich": "enrich",
     "/backtest": "backtest",
+    "/backtest/async": "backtest",
+    "/backtest/async/0b6f2c1e-job": "backtest_poll",
+    "/backtest/export": "backtest",
     "/refresh": "refresh",
     "/auth/register": "register",
     "/auth/password-reset/request": "auth_mail",
