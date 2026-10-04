@@ -1,0 +1,4 @@
+VOTE: GUILTY
+REASON: A kill criterion only works if it gets a big enough sample and has a line that counts as failure, and this plan has neither: there is no distribution channel built to bring users in and no threshold, so whatever the second-backtest share turns out to be on a handful of users will be noise, not a verdict on whether people come back.
+DECIDING FACT: The only acquisition channel named, "no-signup trials and shareable result links," is listed as "still ahead," while signup is capped at 50 a day and the record contains no distribution plan, target user, waitlist or early interest.
+WOULD FLIP IF: The case set a numeric threshold for the second-backtest share and day-2/day-7 return, plus a minimum number of users to measure it on, and named a concrete way to reach that many people (with share links and the no-signup trial shipped before launch).

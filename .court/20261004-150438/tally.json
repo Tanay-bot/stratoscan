@@ -1,0 +1,50 @@
+{
+  "verdict": "HUNG JURY",
+  "guilty": 3,
+  "not_guilty": 3,
+  "no_vote": 0,
+  "jurors": [
+    {
+      "juror": "The First-Time Customer",
+      "vote": "GUILTY",
+      "reason": "As someone who has never heard of this, I'd only try it if I could run a quick backtest without signing up, and right now I'd have to make an account, maybe dig a verification email out of spam, and then wait minutes for a result, so I'd close the tab and stay with what I already use.",
+      "fact": "The record lists \"no-signup trials and shareable result links\" as \"still ahead\", and today a first backtest \"can take minutes on cold data.\"",
+      "flip": "The no-signup trial and the under-60-second first backtest were shipped and working before launch, so a stranger could get a real result without signing up and well inside a minute."
+    },
+    {
+      "juror": "The Statistician",
+      "vote": "GUILTY",
+      "reason": "A kill criterion only works if it gets a big enough sample and has a line that counts as failure, and this plan has neither: there is no distribution channel built to bring users in and no threshold, so whatever the second-backtest share turns out to be on a handful of users will be noise, not a verdict on whether people come back.",
+      "fact": "The only acquisition channel named, \"no-signup trials and shareable result links,\" is listed as \"still ahead,\" while signup is capped at 50 a day and the record contains no distribution plan, target user, waitlist or early interest.",
+      "flip": "The case set a numeric threshold for the second-backtest share and day-2/day-7 return, plus a minimum number of users to measure it on, and named a concrete way to reach that many people (with share links and the no-signup trial shipped before launch)."
+    },
+    {
+      "juror": "The Small-Business Owner",
+      "vote": "NOT GUILTY",
+      "reason": "I've opened plenty of things without knowing who'd walk in, and when the rent is a couple of dollars and one person can keep the lights on, a slow month costs next to nothing; the gaps the prosecution lists are things you only learn by opening the doors, provided the founder finishes the remaining plan days first as described.",
+      "fact": "The whole thing runs on free tiers with \"one small always-on server planned at about $2\u20133 a month,\" so a dead month costs the founder almost nothing.",
+      "flip": "The record showed it would open before the no-signup trial and a sub-60-second first backtest are built, since then the first customers would wait minutes or hit the 50-a-day signup cap and never come back."
+    },
+    {
+      "juror": "The Parent",
+      "vote": "NOT GUILTY",
+      "reason": "For the people involved, little is at stake: users pay nothing and get numbers that have been checked against first principles, with a disclaimer next to every result, and the founder's outlay is a few dollars a month, so the risk is small and launching is the only way to learn whether anyone comes back.",
+      "fact": "The accuracy loop re-derives every reported number from first principles, with 14,294 of 14,294 checks passing, and the disclaimer (\"simulated results on historical data, past performance does not predict future results, not investment advice\") sits beside every result, while the planned running cost is about $2\u20133 a month.",
+      "flip": "The record showed the product would launch on price data it cannot legally or reliably show to users, for example yfinance access being cut off with only the untested London Strategic Edge fallback left, whose licence forbids showing its prices to end users. Then the numbers people might act on could no longer be trusted or kept."
+    },
+    {
+      "juror": "The Retired Judge",
+      "vote": "NOT GUILTY",
+      "reason": "The prosecution carries the burden, and what it proves is that the product is unfinished and unproven, which the case openly admits; it does not prove that the plan fails, and on the data licence it claimed more than the record supports.",
+      "fact": "The record lists the missing pieces the prosecution relies on (\"no-signup trials and shareable result links; templates; retention features\", a first backtest \"in under 60 seconds\") as days still ahead in a written 15-day plan to reach \"deployment-ready\", and the founder set \"the share of users who run a second backtest\" as the kill criterion before launch.",
+      "flip": "The record showed the founder means to launch before the no-signup trial, share links and faster first backtest exist, or had no point at which a poor second-backtest rate would actually stop the project."
+    },
+    {
+      "juror": "The Teenager",
+      "vote": "GUILTY",
+      "reason": "Nobody I know is waiting minutes for a backtest that nobody sent them a link to, and the stuff meant to make me come back next week isn't even built yet, so as it's described right now this is a cool engine nobody shows up for twice.",
+      "fact": "A first backtest \"can take minutes on cold data,\" and the no-signup trials, shareable result links and retention features are all listed as \"still ahead.\"",
+      "flip": "The case said launch only after the under-60-second first backtest and the no-signup shareable result links actually ship, so a stranger could get a fast result from a friend's link and want to run a second one."
+    }
+  ]
+}

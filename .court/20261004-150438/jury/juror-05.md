@@ -1,0 +1,4 @@
+VOTE: NOT GUILTY
+REASON: The prosecution carries the burden, and what it proves is that the product is unfinished and unproven, which the case openly admits; it does not prove that the plan fails, and on the data licence it claimed more than the record supports.
+DECIDING FACT: The record lists the missing pieces the prosecution relies on ("no-signup trials and shareable result links; templates; retention features", a first backtest "in under 60 seconds") as days still ahead in a written 15-day plan to reach "deployment-ready", and the founder set "the share of users who run a second backtest" as the kill criterion before launch.
+WOULD FLIP IF: The record showed the founder means to launch before the no-signup trial, share links and faster first backtest exist, or had no point at which a poor second-backtest rate would actually stop the project.
