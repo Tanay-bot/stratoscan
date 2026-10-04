@@ -27,7 +27,8 @@ export interface RouteMeta {
   noindex: boolean
 }
 
-const PUBLIC: RouteMeta[] = [
+/** Public pages. Every indexable one must appear in public/sitemap.xml (sitemap.test.ts). */
+export const PUBLIC: RouteMeta[] = [
   {
     path: '/',
     title: 'Stratoscan — Bridge from idea to candidate list',
@@ -115,7 +116,8 @@ const PUBLIC: RouteMeta[] = [
     path: '/verify-email',
     title: 'Verify Email — Stratoscan',
     description: 'Confirm your email address to activate your Stratoscan account.',
-    noindex: false,
+    // A token landing page: nothing for a search engine to show anyone.
+    noindex: true,
   },
 ]
 

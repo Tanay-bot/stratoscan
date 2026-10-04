@@ -21,6 +21,8 @@ RUN pip install --require-hashes --no-cache-dir -r requirements-lock.txt
 
 # ── Application code ──────────────────────────────────────────────────
 COPY src ./src
+# Fonts for the share-card PNG renderer (src/share_card.py) — OFL, see assets/fonts.
+COPY assets ./assets
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY run.py ./

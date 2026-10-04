@@ -1,7 +1,13 @@
 # Stratoscan — robots.txt
-# All crawlers welcome. Sitemap points search engines at the full page list.
+# Public pages are welcome; the signed-in app and one-time token pages are not
+# content. Shared results live on the API origin and carry their own noindex.
 
 User-agent: *
 Allow: /
+Disallow: /app/
+Disallow: /auth/
+Disallow: /verify-email
+Disallow: /reset-password
+Disallow: /forgot-password
 
 Sitemap: https://stratoscan.com/sitemap.xml

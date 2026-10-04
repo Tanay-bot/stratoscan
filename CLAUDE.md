@@ -177,6 +177,7 @@ stratoscan/                          # Backend (Python)
 │   ├── metrics.py           # Prometheus /metrics (stdlib exporter) + middleware
 │   ├── admin_dashboard.py   # Self-contained HTML admin dashboard
 │   ├── share_page.py        # Day 6: public share summary (field whitelist) + server-rendered page
+│   ├── share_card.py        # Day 7: 1200×630 PNG preview card (Pillow + assets/fonts, cached by content hash)
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -334,7 +335,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/results/share` | Bearer or `X-Anon-Token` | publish a finished job as a public link (server-built whitelist summary) |
 | DELETE | `/results/share/{share_id}` | Bearer or `X-Anon-Token` | revoke (row deleted; owner-scoped WHERE) |
 | GET | `/results/shares` | Bearer or `X-Anon-Token` | my live links |
-| GET | `/r/{share_id}`, `/r/{share_id}.json` | — | public share page (server-rendered, noindex, script-free CSP) / JSON |
+| GET | `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png` | — | public share page (server-rendered, noindex, script-free CSP, OG/Twitter card) / JSON / 1200×630 preview card |
 | POST | `/backtest/export` | Bearer | trades → CSV |
 | POST | `/screen/export` | — | screen results → CSV |
 | POST | `/enrich` | — | screen + sentiment |
@@ -632,6 +633,17 @@ stays private until someone adds it here on purpose. `render_share_page(summary,
 app_url=, image_url=None)` returns the full HTML (`noindex`, canonical, OG/Twitter tags, inline
 SVG curve, disclaimer + `/risk` link, "run this yourself" → `{APP_BASE_URL}/try?q=`); every
 string is `html.escape`d and the route adds a script-free CSP.
+
+### `src/share_card.py` — link preview cards (pure, Pillow)
+
+`render_share_card(summary) -> bytes` draws the 1200×630 PNG served at `/r/{id}.png`: query,
+headline return (Inter Bold, shrinks to ≥48px so it reads at thumbnail size), SPY's end level
+as a marker (a level, never a fake path), the curve on a 2× supersampled layer, and the full
+disclaimer on the image. Fonts are `stratoscan/assets/fonts/Inter-*.ttf` (OFL) — the Dockerfile
+copies `assets/`; without it every card 500s. Text goes through `clean_text` (strips `Cc`/`Cf`
+incl. bidi overrides, drops glyphs the font lacks) and BASIC layout (no libraqm dependence).
+Output is deterministic, so `api._SHARE_CARD_CACHE` keys it by `card_key(summary)` (bump
+`CARD_VERSION` when the layout changes); the DB lookup runs first, so a revoked link 404s.
 
 ### `src/backfill.py` & `src/cache_warmer.py`
 

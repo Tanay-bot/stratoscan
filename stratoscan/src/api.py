@@ -4140,6 +4140,44 @@ def _load_public_share(share_id: str) -> Dict[str, Any]:
     return row
 
 
+# Preview images are deterministic per summary, so a rendered PNG is cached
+# under its content hash: repeat fetches of a popular link cost a dict lookup,
+# and an attacker cannot force renders without first creating real shares
+# (the "share" scope caps that). Unknown ids 404 before any rendering.
+_SHARE_CARD_CACHE = TTLCache(ttl_seconds=24 * 3600, max_entries=256, name="share_card")
+
+
+@app.get(
+    "/r/{share_id}.png",
+    summary="Public share preview image (1200×630 PNG for link cards)",
+    tags=["Sharing"],
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def public_share_image(request: Request, response: Response, share_id: str):
+    """The Open Graph / Twitter Card image for a share link."""
+    from starlette.concurrency import run_in_threadpool
+
+    from src.share_card import card_key, render_share_card
+
+    row = _load_public_share(share_id)
+    key = card_key(row["summary"])
+    etag = f'"{key[:32]}"'
+    headers = {
+        "Cache-Control": "public, max-age=3600",
+        "ETag": etag,
+        "X-Content-Type-Options": "nosniff",
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    png = _SHARE_CARD_CACHE.get(key)
+    if png is None:
+        # ~50–200 ms of CPU: off the event loop so it cannot stall other requests.
+        png = await run_in_threadpool(render_share_card, row["summary"])
+        _SHARE_CARD_CACHE.set(key, png)
+    return Response(content=png, media_type="image/png", headers=headers)
+
+
 @app.get(
     "/r/{share_id}.json",
     summary="Public share payload (JSON)",
@@ -4163,10 +4201,12 @@ async def public_share_page(request: Request, response: Response, share_id: str)
     from src.share_page import render_share_page
 
     row = _load_public_share(share_id)
+    page_url = _share_url(request, share_id)
     page = render_share_page(
         row["summary"],
-        page_url=_share_url(request, share_id),
+        page_url=page_url,
         app_url=settings.app_base_url,
+        image_url=f"{page_url}.png",
     )
     return HTMLResponse(page, headers=_SHARE_PAGE_HEADERS)
 

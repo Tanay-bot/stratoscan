@@ -213,8 +213,9 @@ def render_share_page(
 ) -> str:
     """A complete server-rendered HTML page for one shared result.
 
-    ``image_url`` (Day 7) adds Open Graph / Twitter Card tags pointing at the
-    preview image; without it the page still renders fully.
+    ``image_url`` adds the Open Graph / Twitter Card image tags (the
+    ``/r/{id}.png`` card from :mod:`src.share_card`); without it the page
+    still renders fully, as a small-card summary.
     """
     q = summary.get("query") or "A Stratoscan strategy"
     h = summary.get("headline") or {}
@@ -239,12 +240,19 @@ def render_share_page(
     meta_image = ""
     if image_url:
         e_img = html.escape(image_url, quote=True)
+        e_alt = html.escape(
+            f"Equity curve of a simulated backtest: {_fmt_pct(ret)} vs SPY {_fmt_pct(spy)}",
+            quote=True,
+        )
         meta_image = (
             f'<meta property="og:image" content="{e_img}">'
             f'<meta property="og:image:width" content="1200">'
             f'<meta property="og:image:height" content="630">'
+            f'<meta property="og:image:type" content="image/png">'
+            f'<meta property="og:image:alt" content="{e_alt}">'
             f'<meta name="twitter:card" content="summary_large_image">'
             f'<meta name="twitter:image" content="{e_img}">'
+            f'<meta name="twitter:image:alt" content="{e_alt}">'
         )
     else:
         meta_image = '<meta name="twitter:card" content="summary">'

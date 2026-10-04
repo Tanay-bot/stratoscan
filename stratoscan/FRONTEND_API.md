@@ -270,6 +270,12 @@ fallback to the trial identity).
   benchmark_total_return_pct, excess_return_pct, sharpe_ratio, max_drawdown_pct,
   win_rate_pct, total_trades}, period{start,end}, equity_curve}` — no email,
   user id, job id, trial id or trade log, ever.
+- `GET /r/{share_id}.png` — the 1200×630 preview card the page's `og:image` /
+  `twitter:image` point at (`summary_large_image`): query, headline return,
+  where SPY ended, the curve, and the disclaimer on the image itself. Sends an
+  `ETag` (answer `If-None-Match` with 304) and `Cache-Control: public,
+  max-age=3600`; a revoked link's image 404s at once (browsers/CDNs may keep a
+  copy for up to that hour).
 
 `url` uses `SHARE_BASE_URL` (the API's public origin) when set, else the
 request's own origin. Share ids are 128-bit random; deleting an account

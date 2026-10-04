@@ -41,6 +41,9 @@ slowapi>=0.1.10,<0.2
 # Database Migrations
 alembic>=1.13,<2.0
 
+# Share-link preview images (Day 7) — server-rendered PNG, no browser
+pillow>=11.0,<13.0
+
 # Testing (dev only — also in pyproject.toml [dev] extra)
 pytest>=7.0,<9.0
 pytest-mock>=3.10,<4.0

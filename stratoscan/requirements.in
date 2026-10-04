@@ -21,3 +21,5 @@ pydantic-settings==2.14.2
 fastapi==0.141.1
 uvicorn[standard]==0.52.0
 alembic==1.18.5
+# Day 7: share-link preview images (server-rendered PNG, no browser).
+pillow==12.3.0

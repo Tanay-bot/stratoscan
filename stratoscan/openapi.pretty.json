@@ -1214,6 +1214,45 @@
         }
       }
     },
+    "/r/{share_id}.png": {
+      "get": {
+        "tags": [
+          "Sharing"
+        ],
+        "summary": "Public share preview image (1200\u00d7630 PNG for link cards)",
+        "description": "The Open Graph / Twitter Card image for a share link.",
+        "operationId": "public_share_image_r__share_id__png_get",
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Share Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/r/{share_id}.json": {
       "get": {
         "tags": [

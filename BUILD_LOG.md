@@ -3,6 +3,19 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 7 — Make a shared link worth clicking
+
+**Shipped:** every share link now unfurls into a 1200×630 card — the query, the return, where
+SPY ended, the curve, and the full disclaimer on the image itself — rendered in Python
+(Pillow, hash-locked; Inter shipped as OFL fonts), cached by content hash, ETag/304, and
+og:image/twitter:image on the page. Sitemap and robots now agree with the SEO registry (a
+test keeps them that way). 11 hostile summaries render; 11/11 mutations caught.
+
+**Broke / found:** Pillow's bundled font is ASCII-only — an em dash or "é" in a query drew a
+box. Measuring text costs ~1 ms per call, so the first ellipsis loop took 900 ms on a long
+query; binary search brought the worst case to 150 ms. The sitemap was missing /risk,
+/terms, /privacy and /try, and advertised the token-only /verify-email.
+
 ## Day 6 — No signup wall, and shareable proof
 
 **Shipped:** `/try` — the real backtester for strangers: three free runs on a signed trial
