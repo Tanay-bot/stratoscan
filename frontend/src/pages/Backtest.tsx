@@ -44,6 +44,10 @@ import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
 import { TrialBanner } from '@/components/backtest/TrialBanner'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
+import { RulesPanel, type RuleEdits } from '@/components/backtest/RulesPanel'
+import { Disclosure } from '@/components/ui/disclosure'
+import { describeStrategy } from '@/lib/rules'
+import { useLayers } from '@/lib/disclosure'
 import type { StrategyTemplate } from '@/lib/templates'
 import {
   backtest,
@@ -133,6 +137,11 @@ export function Backtest() {
   // Day 6: signed-out visitors run as a free trial; a finished run can be
   // published as a public link (server-built page) and un-published again.
   const signedIn = useAuth((s) => s.token !== null)
+  // Day 9: layers 3–5 collapsed by default, remembered per user.
+  const userKey = useAuth((s) => (s.user ? `user:${s.user.id}` : 'guest'))
+  const { layers, toggle } = useLayers(userKey)
+  // Re-runs of the same query with changed settings — the overfitting meter.
+  const [tuneRuns, setTuneRuns] = useState(0)
   const [lastJobId, setLastJobId] = useState<string | null>(null)
   const [share, setShare] = useState<{ share_id: string; url: string } | null>(null)
   const [sharing, setSharing] = useState(false)
@@ -144,7 +153,7 @@ export function Backtest() {
   }
 
   /** Build the full BacktestRequest from the current tune-drawer state. */
-  const buildRequest = (q: string): BacktestRequest => {
+  const buildRequest = (q: string, over?: RuleEdits): BacktestRequest => {
     // Fold strategy-builder conditions into the query so the demo + LLM both use them
     // Strategy-builder conditions are the user's own words, folded into the
     // query; numeric overrides travel as structured fields below.
@@ -157,8 +166,8 @@ export function Backtest() {
       top_n: topN,
       stop_loss_pct: stopLoss,
       take_profit_pct: takeProfit,
-      rsi_buy_below: rsiBuy,
-      rsi_sell_above: rsiSell,
+      rsi_buy_below: over ? over.rsiBuy : rsiBuy,
+      rsi_sell_above: over ? over.rsiSell : rsiSell,
       allow_short: allowShort,
       start_date: startDate || null,
       end_date: endDate || null,
@@ -173,12 +182,17 @@ export function Backtest() {
     }
   }
 
-  const run = async (q: string) => {
+  const run = async (q: string, over?: RuleEdits) => {
     const trimmed = q.trim()
     if (!trimmed) return
     // The same event the Screener fires, distinguished by `surface` so the
     // two entry points can be compared. Again: no query text.
     track('query_submitted', { surface: 'backtest' })
+    if (trimmed === lastQuery.current) {
+      setTuneRuns((n) => n + 1)
+    } else {
+      setTuneRuns(0)
+    }
     if (trimmed !== lastQuery.current) {
       lastQuery.current = trimmed
       setParams({ q: trimmed }, { replace: false })
@@ -191,7 +205,7 @@ export function Backtest() {
     setShare(null)
     pushMsg('user', trimmed)
     try {
-      const req = buildRequest(trimmed)
+      const req = buildRequest(trimmed, over)
       let res: BacktestResponse
       if (DEMO_MODE) {
         res = await backtest(req)
@@ -622,6 +636,15 @@ export function Backtest() {
   )
 
   // ── Right-top: results ──────────────────────────────────────────────────────
+  const codePane = (
+    <CodePanel
+      status={codeStatus}
+      query={lastQuery.current}
+      params={codeParams}
+      symbols={result?.total_symbols_tested}
+    />
+  )
+
   const resultsPane = (
     <section
       aria-label="Backtest results"
@@ -778,7 +801,7 @@ export function Backtest() {
                   Simulated strategy
                 </span>
                 <Badge variant="grape" className="text-[11px] normal-case tracking-normal">
-                  {(result?.strategy?.entry as string | undefined) ??
+                  {describeStrategy(result?.strategy).entry.join(' and ') ||
                     strategyToSentence(conditions)}
                 </Badge>
               </div>
@@ -1015,21 +1038,6 @@ export function Backtest() {
               >
                 {!exporting && <Download className="h-3.5 w-3.5" aria-hidden="true" />} Export CSV
               </Button>
-              {/* Tier 3: compare mode — pin this run as the baseline */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setBaseline(result)
-                  toast.success(
-                    'Baseline set',
-                    'Run another strategy to compare against this one on the same symbol set.',
-                  )
-                }}
-                disabled={!result || loading}
-              >
-                <GitCompareArrows className="h-3.5 w-3.5" aria-hidden="true" /> Set as baseline
-              </Button>
               {/* Day 6: publish this result as a public, server-rendered page.
                   Demo mode (no server) falls back to the setup link, which
                   re-runs the same strategy rather than showing this result. */}
@@ -1114,6 +1122,121 @@ export function Backtest() {
               </p>
             )}
           </div>
+
+          {/* Day 9: progressive disclosure. Layers 1–2 (the box and the result)
+              are always visible; 3–5 open on demand and stay as each person
+              left them. Depth is collapsed, never removed. */}
+          <Disclosure
+            step={3}
+            title="Show the rules"
+            hint="What was screened and traded, in plain English — and change it"
+            open={layers.rules}
+            onToggle={() => toggle('rules')}
+          >
+            <RulesPanel
+              strategy={result.strategy}
+              disabled={loading || pending}
+              onRerun={(edits) => {
+                setRsiBuy(edits.rsiBuy)
+                setRsiSell(edits.rsiSell)
+                void run(lastQuery.current, edits)
+              }}
+            />
+          </Disclosure>
+
+          <Disclosure
+            step={4}
+            title="Adjust & compare"
+            hint="Stops, sizing, date range, compare two strategies, the setup link"
+            open={layers.adjust}
+            onToggle={() => toggle('adjust')}
+          >
+            <div className="space-y-3 text-sm">
+              <div
+                role="note"
+                className={`rounded-xl border px-3 py-2.5 text-xs ${tuneRuns >= 3 ? 'border-amber-400/40 bg-amber-400/[0.08] text-amber-100' : 'border-white/[0.08] text-text-mid'}`}
+              >
+                <p className="font-semibold text-text-hi">
+                  {tuneRuns >= 3
+                    ? `You have re-run this strategy ${tuneRuns} times with different settings.`
+                    : 'Tuning is not testing.'}
+                </p>
+                <p className="mt-0.5">
+                  Every re-run is fitted to the same ten years. Adjust until the number looks good
+                  and you have described the past, not found an edge — check the walk-forward
+                  out-of-sample result and the parameter sensitivity before trusting it.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => setTuneOpen(true)}>
+                  Open the tuning panel
+                </Button>
+                {/* Tier 3: compare mode — pin this run as the baseline */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setBaseline(result)
+                    toast.success(
+                      'Baseline set',
+                      'Run another strategy to compare against this one on the same symbol set.',
+                    )
+                  }}
+                  disabled={!result || loading}
+                >
+                  <GitCompareArrows className="h-3.5 w-3.5" aria-hidden="true" /> Set as baseline
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const url = `${window.location.origin}${window.location.pathname}?${serializeParams(buildRequest(lastQuery.current))}`
+                    try {
+                      await navigator.clipboard.writeText(url)
+                      toast.success(
+                        'Setup link copied',
+                        'It re-runs this strategy with these settings.',
+                      )
+                    } catch {
+                      window.prompt('Copy your setup link:', url)
+                    }
+                  }}
+                >
+                  <Link2 className="h-3.5 w-3.5" aria-hidden="true" /> Copy setup link
+                </Button>
+              </div>
+              <p className="text-xs text-text-mid">
+                A setup link re-runs the strategy with every setting above; a share link (Share
+                result) shows this exact result to anyone.
+              </p>
+            </div>
+          </Disclosure>
+
+          <Disclosure
+            step={5}
+            title="Show the code"
+            hint="The strategy as a script, and the raw configuration the engine ran"
+            open={layers.code}
+            onToggle={() => toggle('code')}
+          >
+            <div className="space-y-3">
+              <div className="h-[260px]">{codePane}</div>
+              <div>
+                <p className="mb-1.5 text-2xs font-semibold uppercase tracking-wider text-text-mid">
+                  Raw configuration (exactly what the engine received)
+                </p>
+                {/* Focusable so keyboard users can scroll it (WCAG 2.1.1). */}
+                <pre
+                  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+                  tabIndex={0}
+                  aria-label="Raw strategy configuration, JSON"
+                  className="max-h-64 overflow-auto rounded-xl bg-black/40 p-3 font-mono text-[11px] leading-relaxed text-text-hi"
+                >
+                  {JSON.stringify(result.strategy ?? {}, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </Disclosure>
         </>
       )}
     </section>
@@ -1133,15 +1256,6 @@ export function Backtest() {
     />
   )
 
-  const codePane = (
-    <CodePanel
-      status={codeStatus}
-      query={lastQuery.current}
-      params={codeParams}
-      symbols={result?.total_symbols_tested}
-    />
-  )
-
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
       {!signedIn && !DEMO_MODE && <TrialBanner left={trialLeft} exhausted={trialExhausted} />}
@@ -1151,7 +1265,6 @@ export function Backtest() {
         <div className="min-h-[280px] flex-1 rounded-2xl border border-white/[0.07] bg-ink-panel/50 p-3">
           {resultsPane}
         </div>
-        <div className="h-[240px] shrink-0">{codePane}</div>
       </div>
 
       {/* Desktop: 3-pane resizable workspace */}
@@ -1162,23 +1275,10 @@ export function Backtest() {
           minRatio={0.22}
           maxRatio={0.5}
           storageKey="bt-chat-split"
-          labels={{ first: 'Chat', second: 'Results & code' }}
+          labels={{ first: 'Chat', second: 'Results' }}
           className="h-full"
           first={chatPane}
-          second={
-            <SplitPane
-              direction="column"
-              defaultRatio={0.72}
-              minRatio={0.5}
-              maxRatio={0.88}
-              storageKey="bt-results-split"
-              labels={{ first: 'Results', second: 'Generated code' }}
-              className="h-full"
-              paneClassName="p-1"
-              first={resultsPane}
-              second={codePane}
-            />
-          }
+          second={<div className="h-full p-1">{resultsPane}</div>}
         />
       </div>
     </div>

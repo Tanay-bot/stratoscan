@@ -112,6 +112,31 @@ function ChartTooltip({
   )
 }
 
+const pctText = (v: number | null | undefined) =>
+  v === null || v === undefined || Number.isNaN(v)
+    ? 'unknown'
+    : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+
+/** A one-sentence description of what the chart shows, for screen readers. */
+export function chartSummary(
+  item: BacktestResultItem,
+  mode: 'equity' | 'drawdown',
+  showBenchmark = true,
+): string {
+  const curve = item.equity_curve ?? []
+  const first = curve[0]?.date
+  const last = curve[curve.length - 1]?.date
+  const span = first && last ? ` from ${first.slice(0, 10)} to ${last.slice(0, 10)}` : ''
+  if (mode === 'drawdown') {
+    return `Drawdown chart for ${item.symbol}${span}: deepest decline ${pctText(item.max_drawdown_pct)}.`
+  }
+  const bench =
+    showBenchmark && item.benchmark_total_return_pct != null
+      ? `, versus ${pctText(item.benchmark_total_return_pct)} for SPY`
+      : ''
+  return `Equity curve for ${item.symbol}${span}: total return ${pctText(item.total_return_pct)}${bench}.`
+}
+
 export function EquityCurve({
   item,
   showBenchmark = true,
@@ -141,6 +166,7 @@ export function EquityCurve({
   const stroke = positive ? '#00d4ff' : '#ea3943'
   const fillId = positive ? 'gradNeon' : 'gradLoss'
   const hasFan = !!item.monte_carlo?.available && mode === 'equity'
+  const summary = chartSummary(item, mode, showBenchmark)
 
   return (
     <div>
@@ -179,7 +205,9 @@ export function EquityCurve({
         )}
       </div>
 
-      <div ref={ref} style={{ height }} className="-mx-2">
+      {/* Screen readers get the chart's story in words; the SVG itself is
+          hidden from them (hundreds of unlabelled path points are noise). */}
+      <div ref={ref} style={{ height }} className="-mx-2" role="img" aria-label={summary}>
         {width > 0 && (
           <ResponsiveContainer width="100%" height="100%">
             {mode === 'equity' ? (

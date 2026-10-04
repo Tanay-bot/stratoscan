@@ -16,7 +16,7 @@ Bloomberg Terminal density inside Instagram-grade frosted glass. Deep-space ink 
 
 - **Ground:** `#0a0a0f` (ink), `#07070b` (deep), panel `#0e0e16`/`#14141f`. Body background carries two faint radial glows (cyan upper-left, purple right) over the flat ground.
 - **Accents:** `#00d4ff` neon (primary actions, active nav, live dots), `#7c3aed` grape (secondary), gains `#16c784`, losses `#ea3943`, amber for warnings.
-- **Text:** hi `#f2f4fb`, mid `#9aa3b8`, low `#7c86a0` (≥4.5:1 on the ground).
+- **Text:** hi `#f2f4fb`, mid `#9aa3b8`, low `#8690aa` — each ≥4.5:1 on the ground AND on `.glass` / `.glass-strong` over the neon and grape glows (measured in `src/lib/contrast.test.ts`; low was `#7c86a0`, 4.24:1 on glass-strong).
 - **Type:** Inter (UI), JetBrains Mono (all numerals, tickers, symbols, tabular columns via `font-variant-numeric: tabular-nums`). Tracking −0.03em on display headings; 2xs uppercase micro-labels for card headers.
 - **Elevation:** glass panels use a 1px border + backdrop blur, never border-plus-wide-shadow (ghost-card ban). Glow shadows (`0 0 24px rgba(0,212,255,.35)`) reserved for the primary button and live indicators. Radii 12–16px; pills only for small controls.
 

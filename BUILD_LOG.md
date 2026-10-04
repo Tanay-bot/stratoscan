@@ -3,9 +3,22 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
-## Day 9 (part) — Momentum stops churning; Tune is real
+## Day 9 — Simple on the surface, deep underneath
 
-**Shipped (approved signal change):** bullish momentum now enters on price above the 50-day
+**Shipped:** five layers on the backtest — the box, the result, then three collapsed panels
+that remember each person's choices: "Show the rules" (the rules in plain English, defaults
+labelled as defaults, and editable in place — re-runs without retyping), "Adjust & compare"
+(an overfitting warning that gets louder after three re-runs, compare mode, the setup link),
+and "Show the code" (the script plus the raw configuration the engine ran) — one click from
+any result. Charts describe themselves to screen readers; a re-run from the panel is proven
+to give the same numbers as the rule typed from scratch.
+
+**Broke / found:** the muted text colour measured 4.24:1 on the stronger glass panels — under
+WCAG AA for small text — so it was lightened to 4.83:1 and a test now measures every text
+colour on every panel over every glow. The "Simulated strategy" badge read a field the API
+never sends.
+
+**Earlier the same day (approved signal change):** bullish momentum now enters on price above the 50-day
 inside an uptrend and exits when price breaks the 200-day — rules that cannot both be true,
 so the sim can no longer buy and sell on consecutive bars. Median holds went from 1 day to
 18–128 days; pinned by a new golden scenario, and the three momentum templates are back. The

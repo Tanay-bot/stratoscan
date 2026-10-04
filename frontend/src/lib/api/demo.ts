@@ -1219,12 +1219,20 @@ export function demoBacktest(req: BacktestRequest): BacktestResponse {
 
   return {
     query: req.query,
+    // Same shape as the real `strategy` echo (buy_rules / sell_rules + the
+    // execution settings), so "Show the rules" works in demo mode too.
     strategy: {
-      entry: interpreted.map((r) => r.label).join(' AND ') || 'Composite score > 70',
-      exit: `stop_loss ${Math.round(stopLoss * 100)}% / take_profit ${Math.round(takeProfit * 100)}%`,
+      buy_rules: [`rsi < ${req.rsi_buy_below ?? 30}`],
+      sell_rules: [`rsi > ${req.rsi_sell_above ?? 70}`],
+      fee_rate: 0.001,
+      slippage: 0.0005,
+      stop_loss: stopLoss,
+      take_profit: takeProfit,
       position_sizing: sizing,
+      allow_short: !!req.allow_short,
+      max_leverage: 1,
       initial_capital: initialCapital,
-      fees: '0.1% per side + slippage 5bps',
+      screen: interpreted.map((r) => r.label),
     },
     results,
     total_symbols_tested: topN,

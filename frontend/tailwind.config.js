@@ -33,7 +33,9 @@ export default {
         text: {
           hi: '#f2f4fb',
           mid: '#9aa3b8',
-          low: '#7c86a0',
+          // Day 9: was #7c86a0 — measured 4.24:1 on glass-strong (below WCAG AA's
+          // 4.5:1 for small text). contrast.test.ts keeps every text token honest.
+          low: '#8690aa',
         },
       },
       fontFamily: {

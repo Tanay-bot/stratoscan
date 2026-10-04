@@ -916,9 +916,10 @@ Sentry `ErrorBoundary`.
 - **Backtest** (the biggest page, 1,100+ lines) — 3-pane workspace: strategy chat →
   KPI cards (total return, Sharpe, max DD, win rate vs SPY) → equity curve + drawdown charts
   (Recharts) → robustness blocks (Monte Carlo, CI, walk-forward, parameter grid) → generated
-  code panel → compare mode (pin strategy A, re-run B on A's symbols) → async progress →
-  tune panel (RSI/SMA/stops/position sizing/allocation) → shareable links
-  (`lib/backtestParams.ts` serializes all params into the URL).
+  compare mode (pin strategy A, re-run B on A's symbols) → async progress → tune panel
+  (RSI thresholds/stops/position sizing/allocation) → shareable links (`lib/backtestParams.ts`
+  serializes all params into the URL). Day 9: everything past the result sits in three
+  collapsed, remembered layers (rules → adjust & compare → code); see §19.
 - **News** — feed with per-article sentiment badges.
 - **Dashboard** — watchlist, saved screeners, recent backtests (from personal store).
 - **Auth / VerifyEmail / Settings / StockDetail** — auth forms, verification status,
@@ -1199,6 +1200,14 @@ These shaped current behavior — don't "clean up" them without understanding wh
   **their** …" now sets the same trend flags as "its" (plural queries silently lost the
   condition). Golden cross / Bollinger ideas are screened but traded on RSI timing, so they are
   not templates.
+- **Day 9 — five layers:** the Backtest result shows layers 1–2; "Show the rules" (layer 3,
+  `RulesPanel` + `lib/rules.ts` — English rules, defaults labelled, RSI thresholds editable →
+  re-run with `rsi_buy_below`/`rsi_sell_above`), "Adjust & compare" (layer 4 — overfitting
+  warning, compare/baseline, setup link, tuning panel) and "Show the code" (layer 5 — script +
+  raw `strategy` JSON) are `Disclosure`s collapsed by default and remembered per user
+  (`lib/disclosure.ts`, key `stratoscan_layers:<user:id|guest>`). The code pane is no longer a
+  permanent split. `text-low` is `#8690aa` (was 4.24:1 on glass-strong); `contrast.test.ts`
+  measures every text token over every panel/backdrop. Charts carry `role="img"` + a summary.
 - **Day 9 (part) — momentum stops churning; Tune is real:** approved signal change — bullish
   momentum now enters on `price > sma_50 AND sma_50 > sma_200` and exits on `price < sma_200`
   (median holds 18–128 days across 6 seeds × 4 synthetic regimes, vs 1 day before). Pinned by

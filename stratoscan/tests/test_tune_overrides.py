@@ -89,5 +89,39 @@ for bad in (0, 100, -5, 150):
         pass
 print("✅ out-of-range or crossed thresholds → 422")
 
+# A re-run from the panel must give the same numbers as typing the same
+# strategy from scratch (Day 9 "done when").
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+from src.backtester import run_backtest  # noqa: E402
+
+rng = np.random.default_rng(11)
+close = 100 * np.exp(np.cumsum(rng.normal(0.0004, 0.018, 1500)))
+idx = pd.bdate_range("2019-01-02", periods=1500)
+df = pd.DataFrame({"Open": np.r_[close[0], close[:-1]], "High": close * 1.01,
+                   "Low": close * 0.99, "Close": close, "Volume": 5_000_000}, index=idx)
+
+
+def sim(**fields):
+    with mock.patch("src.backtester.BacktestEngine", return_value=_Engine()):
+        rules, *_ = _run_backtest_pipeline(BacktestRequest(**fields), USER)
+    r = run_backtest("EQ", rules, "2019-01-02", str(idx[-1].date()), df=df,
+                     compute_robustness=False)
+    return r.total_return, r.final_value, r.total_trades, [t.buy_date for t in r.trades]
+
+
+tuned = sim(query="oversold large cap stocks with RSI below 30", rsi_buy_below=35, rsi_sell_above=65)
+assert tuned[2] > 0, "the comparison needs trades to mean anything"
+with mock.patch("src.backtester.BacktestEngine", return_value=_Engine()):
+    typed_rules, *_ = _run_backtest_pipeline(
+        BacktestRequest(query="oversold large cap stocks with RSI below 35", rsi_sell_above=65), USER)
+retyped = run_backtest("EQ", typed_rules, "2019-01-02", str(idx[-1].date()), df=df,
+                       compute_robustness=False)
+assert tuned == (retyped.total_return, retyped.final_value, retyped.total_trades,
+                 [t.buy_date for t in retyped.trades]), (tuned, retyped.total_return)
+print(f"✅ a panel re-run (RSI 35/65) matches the same thresholds typed from scratch: "
+      f"{tuned[2]} trades, {tuned[0] * 100:+.2f}% both ways")
+
 mock.patch.stopall()
 print("\nALL TUNE-OVERRIDE CHECKS PASSED")
