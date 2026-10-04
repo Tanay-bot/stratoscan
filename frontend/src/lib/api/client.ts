@@ -112,6 +112,9 @@ const AUTH_PATHS = [
   // session: the current token still works until its own deadline, and the
   // normal expiry path handles that. Never auto-logout on it.
   '/auth/refresh',
+  // A 401 here means the TRIAL token was missing or stale — the account
+  // session is fine, so it must not log the user out.
+  '/try/claim',
 ]
 
 api.interceptors.response.use(

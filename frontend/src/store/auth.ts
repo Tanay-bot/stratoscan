@@ -59,6 +59,10 @@ export const useAuth = create<AuthState>((set, get) => ({
     // (previously localStorage-only, so state died with the device). Local
     // cache wins while empty on the server; server data wins otherwise.
     void usePersonal.getState().hydrateFromServer()
+    // Day 6: anything this browser made as a free trial (backtests, share
+    // links) moves into the account now. No-op without a trial token; never
+    // throws; the trial token is cleared only once the server confirms.
+    void services.claimTrialWork()
     return res.user
   },
 

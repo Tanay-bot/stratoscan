@@ -73,6 +73,13 @@ assert RATE_LIMITS == {
     # Polling a running backtest is free work, so it has its own generous
     # scope and must never spend the backtest cost shield.
     "backtest_poll": {"burst": 120, "daily": 10000, "weekly": 50000},
+    # Day 6: a signed-out visitor's backtests. Tighter than "backtest" per IP
+    # (anonymous traffic is the first abuse surface), but with a daily cap
+    # above the 3-run trial allowance so the friendly "create an account"
+    # 403 arrives before any bare 429.
+    "anon_backtest": {"burst": 2, "daily": 6, "weekly": 20},
+    # Creating/revoking/listing share links: DB writes, no LLM or data calls.
+    "share": {"burst": 10, "daily": 100, "weekly": 400},
 }, f"RATE_LIMITS drifted: {RATE_LIMITS}"
 assert GLOBAL_LIMITS == {
     "screener_llm": 900,
@@ -93,6 +100,8 @@ assert SCOPE_GLOBAL == {
     "register": "auth_register",
     # ...and draws on the same planet-wide email budget, not a second one.
     "auth_mail": "auth_register",
+    # Trials draw on the same planet-wide backtest budget as accounts.
+    "anon_backtest": "backtest_llm",
 }, f"SCOPE_GLOBAL drifted: {SCOPE_GLOBAL}"
 print("✅ Approved limit numbers locked in test")
 
@@ -113,6 +122,13 @@ scope_checks = {
     "/auth/change-password": "auth",
     "/auth/login": "auth",
     "/auth/me": "auth",
+    "/try/session": "auth",
+    "/try/backtest": "anon_backtest",
+    "/try/backtest/bt_0b6f2c1e": "backtest_poll",
+    "/try/claim": "auth",
+    "/results/share": "share",
+    "/results/shares": "share",
+    "/r/AbCdEfGhIjKlMnOpQrStUv": "read",
     "/stocks": "read",
     "/stocks/AAPL": "read",
     "/health": "read",

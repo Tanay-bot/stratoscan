@@ -92,10 +92,7 @@ export function BacktestShowcase() {
             ))}
           </ul>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Button
-              size="lg"
-              onClick={() => navigate(user ? '/app/backtest' : '/login?next=/app/backtest')}
-            >
+            <Button size="lg" onClick={() => navigate(user ? '/app/backtest' : '/try')}>
               Open the backtester <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Button>
             <Button size="lg" variant="outline" onClick={() => navigate('/how-it-works')}>

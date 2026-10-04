@@ -1,4 +1,11 @@
-import { api, DEMO_MODE, LONG_TIMEOUT_MS, delay, unwrap } from './client'
+import { api, DEMO_MODE, LONG_TIMEOUT_MS, delay, getToken, unwrap } from './client'
+import {
+  clearTrialToken,
+  ensureTrialToken,
+  getTrialToken,
+  TRIAL_HEADER,
+  trialHeaders,
+} from '../trial'
 import {
   authResponseSchema,
   backtestResponseSchema,
@@ -19,6 +26,7 @@ import {
 } from './demo'
 import type {
   AuthResponse,
+  BacktestJobStarted,
   BacktestJobStatus,
   BacktestRequest,
   BacktestResponse,
@@ -29,6 +37,8 @@ import type {
   ScreenRequest,
   ScreenResponse,
   SentimentSummary,
+  ShareLink,
+  ShareListItem,
   StockResult,
   StocksResponse,
   UserOut,
@@ -244,21 +254,24 @@ export async function backtest(req: BacktestRequest): Promise<BacktestResponse> 
 /**
  * Start an async backtest and get a job_id to poll for per-symbol progress.
  * Returns immediately; poll ``backtestJobStatus`` until done/error.
+ *
+ * Signed out, the same run goes through the trial endpoint (Day 6: no signup
+ * wall) — same engine, same job flow, a small free allowance, and
+ * ``anon_remaining`` in the response.
  */
-export async function backtestAsync(req: BacktestRequest): Promise<{
-  job_id: string
-  status: string
-  phase?: string
-  total_symbols?: number
-}> {
+export async function backtestAsync(req: BacktestRequest): Promise<BacktestJobStarted> {
   if (DEMO_MODE) {
     await demoLatency()
     // Demo has no background jobs — simulate an instantly-complete run.
     return { job_id: 'demo', status: 'queued', phase: 'interpreting' }
   }
-  return unwrap<{ job_id: string; status: string; phase?: string; total_symbols?: number }>(
-    api.post('/backtest/async', req),
-  )
+  if (getToken() === null) {
+    const trial = await ensureTrialToken()
+    return unwrap<BacktestJobStarted>(
+      api.post('/try/backtest', req, { headers: { [TRIAL_HEADER]: trial } }),
+    )
+  }
+  return unwrap<BacktestJobStarted>(api.post('/backtest/async', req))
 }
 
 /** Poll an async backtest job for its live progress / final result. */
@@ -268,7 +281,58 @@ export async function backtestJobStatus(jobId: string): Promise<BacktestJobStatu
     // result directly and doesn't poll.
     throw new Error('demo-mode backtest is synchronous')
   }
-  return unwrap<BacktestJobStatus>(api.get(`/backtest/async/${jobId}`))
+  if (getToken() === null) {
+    return unwrap<BacktestJobStatus>(
+      api.get(`/try/backtest/${encodeURIComponent(jobId)}`, { headers: trialHeaders() }),
+    )
+  }
+  return unwrap<BacktestJobStatus>(api.get(`/backtest/async/${encodeURIComponent(jobId)}`))
+}
+
+// ── Public share links (Day 6: shareable proof) ────────────────────────────
+// Sharing is explicit: nothing is public until the owner calls shareResult.
+// The server builds the public page from its own stored result, so these
+// calls only ever send a job id — never numbers.
+
+/** Publish a finished backtest; sharing the same job twice returns the same link. */
+export async function shareResult(jobId: string): Promise<ShareLink> {
+  return unwrap<ShareLink>(
+    api.post('/results/share', { job_id: jobId }, { headers: trialHeaders() }),
+  )
+}
+
+/** Revoke a share link — it stops working for everyone. */
+export async function revokeShare(shareId: string): Promise<void> {
+  await api.delete(`/results/share/${encodeURIComponent(shareId)}`, { headers: trialHeaders() })
+}
+
+/** The caller's live share links, newest first. */
+export async function listShares(): Promise<ShareListItem[]> {
+  const res = await unwrap<{ shares: ShareListItem[] }>(
+    api.get('/results/shares', { headers: trialHeaders() }),
+  )
+  return res.shares
+}
+
+/**
+ * Move this browser's trial backtests and share links into the account that
+ * just signed in. Clears the trial token only once the server confirms, so a
+ * failed claim can be retried on the next sign-in. Never throws.
+ */
+export async function claimTrialWork(): Promise<{
+  claimed_backtests: number
+  claimed_shares: number
+} | null> {
+  if (DEMO_MODE || getToken() === null || getTrialToken() === null) return null
+  try {
+    const res = await unwrap<{ claimed_backtests: number; claimed_shares: number }>(
+      api.post('/try/claim', null, { headers: trialHeaders() }),
+    )
+    clearTrialToken()
+    return res
+  } catch {
+    return null
+  }
 }
 
 /** Download simulated trades as a CSV (POST /backtest/export). */

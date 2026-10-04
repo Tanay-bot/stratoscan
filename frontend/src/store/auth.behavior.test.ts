@@ -23,6 +23,7 @@ vi.mock('@/lib/api/services', () => ({
   })),
   savePersonalData: vi.fn(async () => ({})),
   requiresAuth: vi.fn(() => true),
+  claimTrialWork: vi.fn(async () => null),
 }))
 
 // Force the real (non-demo) auth branch — the dev .env.local sets

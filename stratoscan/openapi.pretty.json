@@ -993,6 +993,311 @@
         }
       }
     },
+    "/try/session": {
+      "post": {
+        "tags": [
+          "Trial"
+        ],
+        "summary": "Start an anonymous trial session (no account needed)",
+        "description": "Mint a signed trial token. Send it as ``X-Anon-Token`` on ``/try/*``\nand ``/results/*`` calls. The id inside is generated here, never chosen\nby the client, so nobody can claim another visitor's results.",
+        "operationId": "try_session_try_session_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/try/backtest": {
+      "post": {
+        "tags": [
+          "Trial"
+        ],
+        "summary": "Start a backtest without an account (trial allowance applies)",
+        "description": "Same engine, same job flow as ``POST /backtest/async``, owned by the\ntrial session. Capped at ``ANON_MAX_SYMBOLS`` symbols; after\n``ANON_BACKTEST_ALLOWANCE`` runs it answers 403 asking for an account.",
+        "operationId": "try_backtest_try_backtest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/try/backtest/{job_id}": {
+      "get": {
+        "tags": [
+          "Trial"
+        ],
+        "summary": "Poll a trial backtest",
+        "description": "Poll a job this trial session owns (404 for anyone else's).",
+        "operationId": "try_backtest_status_try_backtest__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/try/claim": {
+      "post": {
+        "tags": [
+          "Trial"
+        ],
+        "summary": "Move a trial session's backtests and share links into this account",
+        "description": "Called right after signup or login with both the account token and\nthe trial token, so nothing made before signing up is lost.",
+        "operationId": "try_claim_try_claim_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/share": {
+      "post": {
+        "tags": [
+          "Sharing"
+        ],
+        "summary": "Publish one finished backtest as a public share link",
+        "description": "Sharing is explicit opt-in: nothing is public until this is called.\n\nThe public page shows a whitelisted summary built HERE from the engine's\nown stored result \u2014 the browser never supplies the numbers. Sharing the\nsame job twice returns the existing link.",
+        "operationId": "share_result_results_share_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/share/{share_id}": {
+      "delete": {
+        "tags": [
+          "Sharing"
+        ],
+        "summary": "Revoke a share link (the link stops working for everyone)",
+        "description": "Owner-only. Anyone else's request matches nothing and gets 404.",
+        "operationId": "revoke_share_results_share__share_id__delete",
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Share Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/results/shares": {
+      "get": {
+        "tags": [
+          "Sharing"
+        ],
+        "summary": "List my live share links",
+        "operationId": "list_my_shares_results_shares_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/r/{share_id}.json": {
+      "get": {
+        "tags": [
+          "Sharing"
+        ],
+        "summary": "Public share payload (JSON)",
+        "description": "Exactly the whitelisted summary \u2014 no email, user id, job id or trial id.",
+        "operationId": "public_share_json_r__share_id__json_get",
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Share Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/r/{share_id}": {
+      "get": {
+        "tags": [
+          "Sharing"
+        ],
+        "summary": "Public share page (server-rendered HTML)",
+        "description": "Rendered on the server so link-preview crawlers see real content.",
+        "operationId": "public_share_page_r__share_id__get",
+        "parameters": [
+          {
+            "name": "share_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Share Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/backtest/export": {
       "post": {
         "tags": [
@@ -3451,6 +3756,23 @@
         ],
         "title": "SentimentSummary",
         "description": "Aggregate sentiment + recent articles for one stock."
+      },
+      "ShareRequest": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 3,
+            "title": "Job Id",
+            "description": "The finished async backtest to share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "ShareRequest",
+        "description": "Request body for publishing one finished backtest as a share link."
       },
       "StockResult": {
         "properties": {

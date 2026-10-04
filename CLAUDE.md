@@ -176,6 +176,7 @@ stratoscan/                          # Backend (Python)
 │   ├── alerts.py            # Webhook/email alerts (fire-and-forget, throttled)
 │   ├── metrics.py           # Prometheus /metrics (stdlib exporter) + middleware
 │   ├── admin_dashboard.py   # Self-contained HTML admin dashboard
+│   ├── share_page.py        # Day 6: public share summary (field whitelist) + server-rendered page
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -326,6 +327,14 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/backtest` | Bearer | full backtest (20-min frontend timeout) |
 | POST | `/backtest/async` | Bearer | start job → `job_id` |
 | GET | `/backtest/async/{job_id}` | Bearer | poll progress/result |
+| POST | `/try/session` | — | mint a signed trial token (`typ:"anon"`, 30 days) — Day 6 no-signup trial |
+| POST | `/try/backtest` | `X-Anon-Token` | same async job flow, owner `anon:<id>`; ≤5 symbols; 3 free runs then 403 |
+| GET | `/try/backtest/{job_id}` | `X-Anon-Token` | poll a trial job (404 unless owned) |
+| POST | `/try/claim` | Bearer + `X-Anon-Token` | move the trial's jobs + share links into the account |
+| POST | `/results/share` | Bearer or `X-Anon-Token` | publish a finished job as a public link (server-built whitelist summary) |
+| DELETE | `/results/share/{share_id}` | Bearer or `X-Anon-Token` | revoke (row deleted; owner-scoped WHERE) |
+| GET | `/results/shares` | Bearer or `X-Anon-Token` | my live links |
+| GET | `/r/{share_id}`, `/r/{share_id}.json` | — | public share page (server-rendered, noindex, script-free CSP) / JSON |
 | POST | `/backtest/export` | Bearer | trades → CSV |
 | POST | `/screen/export` | — | screen results → CSV |
 | POST | `/enrich` | — | screen + sentiment |
@@ -614,6 +623,16 @@ a thin client over the admin-gated API (login → JWT in localStorage → `/admi
 data endpoint it calls is behind `require_admin`. Admin nav link in the frontend opens
 `{API_ORIGIN}/admin` in a new tab.
 
+### `src/share_page.py` — public share links (pure, no I/O)
+
+`build_share_summary(result)` copies named fields one by one from the engine's stored
+result (portfolio figures when ≥2 symbols, else the single symbol; trade-weighted win rate;
+SPY shown for a portfolio only when every symbol shares one SPY window). A new engine field
+stays private until someone adds it here on purpose. `render_share_page(summary, page_url=,
+app_url=, image_url=None)` returns the full HTML (`noindex`, canonical, OG/Twitter tags, inline
+SVG curve, disclaimer + `/risk` link, "run this yourself" → `{APP_BASE_URL}/try?q=`); every
+string is `html.escape`d and the route adds a script-free CSP.
+
 ### `src/backfill.py` & `src/cache_warmer.py`
 
 - `build_backfill_history(symbols, years, limit, verify)` — bulk-load yfinance OHLCV into the
@@ -645,6 +664,7 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 | `backtest_jobs` | `job_id` PK, `user_email`, `query`, `status` ('queued'/'running'/'done'/'error'/'interrupted'), `phase`, `done_symbols` JSONB, `total_symbols`, `result` JSONB, `error`, timestamps | Async backtest durability; orphans marked 'interrupted' on restart. |
 | `user_data` | `user_id` PK FK users ON DELETE CASCADE, `watchlist` JSONB, `saved_screeners` JSONB, `recent_backtests` JSONB, `updated_at` | Per-user saved state synced from frontend. |
 | `events` | `id`, `name`, `occurred_at` TIMESTAMPTZ, `anon_id`, `user_id` FK users ON DELETE SET NULL, `props` JSONB | The product funnel (Day 4). Written ONLY by `src/analytics.track()`; the per-event prop whitelist lives in `EVENTS` there — no query text, email, symbol list or exception message is ever stored. `user_id` is SET NULL on account deletion, so deleting an account anonymises its events instead of deleting history. |
+| `shared_results` | `share_id` PK (128-bit random), `job_id`, `owner_user_id` FK users ON DELETE CASCADE, `owner_anon`, `query`, `summary` JSONB, `created_at` | Day 6 public share links. `summary` is built by `share_page.build_share_summary` (a field whitelist — never the raw result). Revoke = DELETE. Purged with the account and by a Google takeover of a squatted row. |
 | `error_log` | `id`, `occurred_at` TIMESTAMPTZ, `method`, `route` (template), `error_type`, `trace` | One row per unhandled exception, written by `generic_exception_handler`. `route` is the route TEMPLATE, never the raw URL (which can carry a token); `trace` is scrubbed by `analytics.scrub()` (emails → `<email>`, JWTs → `<jwt>`, `Bearer …` → `Bearer <redacted>`, capped at 8,000 chars). No bodies, no headers. |
 
 ### Backtest DB (`BACKTEST_DATABASE_URL`) — also exists as SQLite (`data/backtest_history.db`) in dev
@@ -798,7 +818,9 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
    | `interpret` | 10 | 100 | 500 | `/interpret` |
    | `enrich` | 3 | 20 | 100 | `/enrich` |
    | `backtest` | 2 | 10 | 50 | `/backtest`, `/backtest/async` (start), `/backtest/export` |
-   | `backtest_poll` | 120 | 10,000 | 50,000 | `GET /backtest/async/{job_id}` — free status reads; no global bucket |
+   | `backtest_poll` | 120 | 10,000 | 50,000 | `GET /backtest/async/{job_id}`, `GET /try/backtest/{job_id}` — free status reads; no global bucket |
+   | `anon_backtest` | 2 | 6 | 20 | `POST /try/backtest` (feeds `backtest_llm`); daily cap > the 3-run allowance so the friendly 403 comes first |
+   | `share` | 10 | 100 | 400 | `/results/*` (DB writes only); `/r/*` public pages fall in `read` |
    | `refresh` | 1 | 10 | 50 | `/refresh` |
    | `auth` | 10 | 50 | 350 | `/auth/*` except register and the email-sending routes |
    | `register` | 3 | 10 | 30 | `/auth/register` (SendGrid cost shield) |
@@ -932,7 +954,7 @@ All keys in `stratoscan/.env` (gitignored, chmod 600). Full annotated template:
 | Finnhub | `FINNHUB_KEY_01..10`, `NEWS_FINNHUB_KEY`, `FINNHUB_REQUEST_TIMEOUT` | round-robin pool |
 | LLM | `SCREENER_LLM_KEY`, `BACKTEST_LLM_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_PROVIDERS`, `LLM_PROVIDER_TIMEOUT`, per-provider `<NAME>_BASE_URL/_MODEL/_KEYS/_TIMEOUT` (ZAI/GEMINI/GROQ/ZENMUX) | `LLM_PROVIDERS` priority list; free flash models |
 | Auth | `JWT_SECRET`, `JWT_EXPIRE_HOURS`, `PASSWORD_MIN_LENGTH` | `openssl rand -hex 32` |
-| Email | `SENDGRID_API_KEY`, `EMAIL_FROM_ADDRESS`, `APP_BASE_URL`, `EMAIL_VERIFICATION_REQUIRED`, `EMAIL_VERIFICATION_TOKEN_TTL_HOURS` | sender must be verified in SendGrid |
+| Email / links | `SENDGRID_API_KEY`, `EMAIL_FROM_ADDRESS`, `APP_BASE_URL`, `SHARE_BASE_URL` (public API origin for `/r/{id}` links; request origin when unset), `EMAIL_VERIFICATION_REQUIRED`, `EMAIL_VERIFICATION_TOKEN_TTL_HOURS` | sender must be verified in SendGrid |
 | Admin | `ADMIN_EMAILS` | auto-promoted at register/login |
 | Rate limits | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_BYPASS_IPS`, `REDIS_RATE_LIMIT_ENABLED`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_RATE_LIMIT_TIMEOUT` | read bucket env-configurable; cost shields fixed |
 | Caching | `CACHE_ENABLED`, `INTERPRET_CACHE_TTL`, `INTERPRET_CACHE_MAX_ENTRIES`, `SCREEN_CACHE_TTL`, `SCREEN_CACHE_MAX_ENTRIES` | |
@@ -1134,6 +1156,19 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 ## 19. Recent significant changes
 
 These shaped current behavior — don't "clean up" them without understanding why:
+
+- **Day 6 — no signup wall + share links:** `/try/*` runs real backtests on a signed trial
+  token (`auth.create_anon_token`, `typ:"anon"`; `get_current_user` refuses it, and
+  `verify_anon_token` refuses account tokens). Trial jobs live in `backtest_jobs` with owner
+  `anon:<id>` (no `@`, so it can never collide with an email). Three layers hold it: the
+  3-run allowance (counted from memory AND the DB, so it survives a restart), the per-IP
+  `anon_backtest` scope (a new token doesn't reset it), and the global `backtest_llm`.
+  `/results/share` publishes `share_page.build_share_summary(result)` — a whitelist — into
+  `shared_results`; `/r/{id}` renders it server-side. Also fixed: the async job stored the
+  Pydantic `BacktestResponse`, which `json.dumps` cannot serialize, so the "done" upsert
+  failed silently and finished results never reached `backtest_jobs` (lost on restart);
+  it now stores `model_dump(mode="json")`. And async failures no longer return `str(e)`
+  (`_public_backtest_error`, golden rule #12).
 
 - **Backtest `start_date` bug fixed (TDD):** the engine silently simulated a truncated window
   while reporting the requested one (cache trusted as complete). `fetch_historical_data` now

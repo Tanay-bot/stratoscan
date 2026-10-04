@@ -71,7 +71,7 @@ export function Pipeline() {
 
       <div className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
         <button
-          onClick={() => navigate('/signup')}
+          onClick={() => navigate('/try')}
           className="group flex items-center gap-2 text-sm font-medium text-neon transition-colors hover:text-white"
         >
           Run the loop yourself

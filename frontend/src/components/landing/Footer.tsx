@@ -6,7 +6,7 @@ const COLUMNS: { title: string; links: { label: string; to: string }[] }[] = [
     title: 'Product',
     links: [
       { label: 'Screener', to: '/app/screener' },
-      { label: 'Backtester', to: '/app/backtest' },
+      { label: 'Backtester', to: '/try' },
       { label: 'News & sentiment', to: '/app/news' },
       { label: 'Dashboard', to: '/app' },
     ],

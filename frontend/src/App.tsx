@@ -22,6 +22,7 @@ const Terms = lazy(() => import('@/pages/Terms').then((m) => ({ default: m.Terms
 const Privacy = lazy(() => import('@/pages/Privacy').then((m) => ({ default: m.Privacy })))
 const Risk = lazy(() => import('@/pages/Risk').then((m) => ({ default: m.Risk })))
 const Auth = lazy(() => import('@/pages/Auth').then((m) => ({ default: m.Auth })))
+const Try = lazy(() => import('@/pages/Try').then((m) => ({ default: m.Try })))
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((m) => ({ default: m.Dashboard })))
 const Screener = lazy(() => import('@/pages/Screener').then((m) => ({ default: m.Screener })))
 const Backtest = lazy(() => import('@/pages/Backtest').then((m) => ({ default: m.Backtest })))
@@ -97,6 +98,8 @@ export default function App() {
             <Route path="/terms" element={<Terms />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/risk" element={<Risk />} />
+            {/* Day 6: the backtester with no signup wall (3 free runs). */}
+            <Route path="/try" element={<Try />} />
             <Route path="/login" element={<Auth mode="login" />} />
             <Route path="/signup" element={<Auth mode="signup" />} />
             <Route path="/verify-email" element={<VerifyEmail />} />

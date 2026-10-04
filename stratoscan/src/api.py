@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import logging
+import re
+import secrets
 import threading
 import time
 import uuid
@@ -25,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from src.config import settings
@@ -145,6 +147,14 @@ RATE_LIMITS = {
     # but still capped per IP so a runaway client can't hammer the DB; feeds
     # no global bucket — there is no shared budget for them to protect.
     "backtest_poll": {"burst": 120, "daily": 10000, "weekly": 50000},
+    # Day 6: a backtest with no account. Tighter than authenticated per IP and
+    # feeding the same planet-wide backtest_llm bucket. The daily cap sits
+    # above the 3-per-session allowance so the friendly "create an account"
+    # prompt is what a visitor normally sees, while discarding the session
+    # token to start over still runs into this per-IP cap.
+    "anon_backtest": {"burst": 2, "daily": 6, "weekly": 20},
+    # Creating, listing and revoking share links: cheap rows, but rows.
+    "share": {"burst": 10, "daily": 100, "weekly": 400},
 }
 
 # Global aggregates (ALL users share one bucket, enforced in the same batch
@@ -178,6 +188,8 @@ SCOPE_GLOBAL = {
     # email costs exactly what a verification email does, so it draws from
     # the same bucket rather than getting a second, additive allowance.
     "auth_mail": "auth_register",
+    # Anonymous backtests spend the same engine/LLM budget as signed-in ones.
+    "anon_backtest": "backtest_llm",
 }
 
 _BURST_SECONDS = 60
@@ -198,6 +210,12 @@ def _scope_for_path(path: str) -> str:
         # poll also drew down the user's 10/day backtests and the planet-wide
         # backtest_llm bucket. Matched before "/backtest"; starting a job
         # (POST /backtest/async, no trailing segment) stays in "backtest".
+        # Day 6 trial routes. Polls before starts, starts before the rest of
+        # /try (session minting and claiming are ordinary auth traffic).
+        ("/try/backtest/", "backtest_poll"),
+        ("/try/backtest", "anon_backtest"),
+        ("/try", "auth"),
+        ("/results", "share"),
         ("/backtest/async/", "backtest_poll"),
         ("/backtest", "backtest"),
         ("/refresh", "refresh"),
@@ -908,6 +926,12 @@ class DeleteAccountRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128, description="Current password")
 
 
+class ShareRequest(BaseModel):
+    """Request body for publishing one finished backtest as a share link."""
+
+    job_id: str = Field(..., min_length=3, max_length=64, description="The finished async backtest to share")
+
+
 class VerifyEmailRequest(BaseModel):
     """Request body for the email verification endpoint.
 
@@ -1391,7 +1415,7 @@ class EndpointMeta(BaseModel):
     methods: List[str]
     summary: str = ""
     tags: List[str] = []
-    auth: str = "none"  # "none" | "bearer" | "admin"
+    auth: str = "none"  # "none" | "bearer" | "trial" | "admin"
 
 
 class FilterFieldMeta(BaseModel):
@@ -1494,10 +1518,17 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
       - /refresh is admin-gated
       - /backtest requires a bearer token (get_current_user)
       - /auth/me, /auth/resend-verification and /auth/logout-all require a token
+      - /try/claim needs BOTH a bearer token and the trial token ("bearer")
+      - other /try/* and /results/* take an X-Anon-Token trial token (or, for
+        /results/*, a bearer token instead) — "trial"
       - everything else is public (rate-limited only)
     """
     if path.startswith(("/admin", "/ops", "/refresh")):
         return "admin"
+    if path == "/try/claim":
+        return "bearer"
+    if path.startswith(("/try/backtest", "/results/")):
+        return "trial"
     if path.startswith("/backtest"):
         return "bearer"
     if path in (
@@ -3604,6 +3635,142 @@ def _load_backtest_job_from_db(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# A failed backtest must not hand the client raw exception text (golden rule
+# #12): an HTTPException's detail was written FOR the user; anything else is
+# logged in full and replaced with a generic sentence. Before Day 6 the async
+# path stored ``str(e)`` on the job and returned it from the status endpoint.
+_GENERIC_BACKTEST_ERROR = (
+    "The backtest failed unexpectedly. Please try again — if it keeps happening, "
+    "try a simpler strategy."
+)
+
+
+def _public_backtest_error(exc: Exception) -> str:
+    """The message a client may see for a failed backtest."""
+    if isinstance(exc, HTTPException) and exc.status_code < 500 and exc.detail:
+        return str(exc.detail)[:300]
+    return _GENERIC_BACKTEST_ERROR
+
+
+def _start_async_backtest(
+    payload: BacktestRequest,
+    owner: str,
+    pipeline_user: Dict[str, Any],
+    user_id: Optional[int],
+    anon_id: Optional[str],
+) -> Dict[str, Any]:
+    """Register a job owned by ``owner`` and run the pipeline in a thread.
+
+    ``owner`` is the account email, or ``anon:<id>`` for a trial session —
+    the value every later ownership check compares against. Shared by
+    ``POST /backtest/async`` and ``POST /try/backtest`` so the two can never
+    drift apart.
+    """
+    from src.analytics import track
+
+    job_id = f"bt_{uuid.uuid4().hex[:12]}"
+    job: Dict[str, Any] = {
+        "job_id": job_id,
+        "status": "queued",
+        "phase": "interpreting",
+        "done_symbols": [],
+        "total_symbols": payload.top_n if not payload.symbols else len(payload.symbols),
+        "result": None,
+        "error": None,
+        "user_email": owner,
+        "created_at": time.time(),
+    }
+    with _BACKTEST_JOBS_LOCK:
+        _evict_stale_backtest_jobs()
+        _BACKTEST_JOBS[job_id] = job
+    _db_backtest_job_upsert(
+        job_id, owner, payload.query, "queued",
+        phase="interpreting", total_symbols=job["total_symbols"],
+    )
+    symbols = int(job["total_symbols"])
+
+    def _progress(symbol: str) -> None:
+        """Engine progress callback: stream each completed symbol."""
+        with _BACKTEST_JOBS_LOCK:
+            cur = _BACKTEST_JOBS.get(job_id)
+            if cur is None:
+                return
+            if symbol not in cur["done_symbols"]:
+                cur["done_symbols"].append(symbol)
+            cur["phase"] = "backtesting"
+            cur["status"] = "running"
+
+    def _run() -> None:
+        started = time.monotonic()
+        try:
+            with _BACKTEST_JOBS_LOCK:
+                _BACKTEST_JOBS[job_id]["status"] = "running"
+                _BACKTEST_JOBS[job_id]["phase"] = "interpreting"
+            strategy_rules, bt_results, screen_message, portfolio = _run_backtest_pipeline(
+                payload, pipeline_user, progress_cb=_progress
+            )
+            # A plain JSON dict, not the Pydantic model: json.dumps() cannot
+            # serialize the model, so the DB upsert below used to fail
+            # silently and a finished result never reached backtest_jobs
+            # (lost on restart, and unshareable). The dict is also exactly
+            # what a poll serves, in memory or from the DB.
+            result = _build_backtest_response(
+                payload, strategy_rules, bt_results, screen_message, portfolio
+            ).model_dump(mode="json")
+            with _BACKTEST_JOBS_LOCK:
+                _BACKTEST_JOBS[job_id]["status"] = "done"
+                _BACKTEST_JOBS[job_id]["phase"] = "done"
+                _BACKTEST_JOBS[job_id]["result"] = result
+            _db_backtest_job_upsert(
+                job_id, owner, payload.query, "done", phase="done", result=result,
+            )
+            track("backtest_completed", user_id=user_id, anon_id=anon_id,
+                  props={"symbols": symbols, "mode": "async"})
+            track("backtest_duration", user_id=user_id, anon_id=anon_id,
+                  props={"duration_ms": int((time.monotonic() - started) * 1000),
+                         "mode": "async"})
+        except Exception as e:  # noqa: BLE001 — job must always finalize
+            logger.error("Async backtest %s failed: %s", job_id, e, exc_info=True)
+            public = _public_backtest_error(e)
+            with _BACKTEST_JOBS_LOCK:
+                _BACKTEST_JOBS[job_id]["status"] = "error"
+                _BACKTEST_JOBS[job_id]["error"] = public
+            _db_backtest_job_upsert(job_id, owner, payload.query, "error", error=public)
+            track("backtest_failed", user_id=user_id, anon_id=anon_id,
+                  props={"mode": "async", "reason": _backtest_failure_reason(e)})
+
+    track("backtest_started", user_id=user_id, anon_id=anon_id,
+          props={"symbols": symbols, "mode": "async"})
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "phase": "interpreting",
+        "total_symbols": job["total_symbols"],
+    }
+
+
+def _job_status_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """The poll response for one job — identical for account and trial owners."""
+    return {
+        "job_id": snapshot["job_id"],
+        "status": snapshot["status"],
+        "phase": snapshot.get("phase"),
+        "done_symbols": snapshot.get("done_symbols", []),
+        "total_symbols": snapshot.get("total_symbols", 0),
+        "error": snapshot.get("error"),
+        "result": snapshot.get("result"),
+    }
+
+
+def _owned_job_snapshot(job_id: str, owner: str) -> Dict[str, Any]:
+    """A job's state if ``owner`` owns it; 404 otherwise (never reveal others')."""
+    snapshot = _backtest_job_snapshot(job_id) or _load_backtest_job_from_db(job_id)
+    if not snapshot or snapshot.get("user_email") != owner:
+        raise HTTPException(status_code=404, detail="Backtest job not found")
+    return snapshot
+
+
 @app.post(
     "/backtest/async",
     summary="Start an async backtest (live per-symbol progress)",
@@ -3624,92 +3791,13 @@ async def backtest_async(
     per-symbol status; the payload shape on completion is identical to the
     synchronous endpoint.
     """
-    # Validate the request up-front (same checks /backtest runs) so a 422
-    # is returned instantly instead of after minutes of compute.
-
-    job_id = f"bt_{uuid.uuid4().hex[:12]}"
-    job: Dict[str, Any] = {
-        "job_id": job_id,
-        "status": "queued",
-        "phase": "interpreting",
-        "done_symbols": [],
-        "total_symbols": payload.top_n if not payload.symbols else len(payload.symbols),
-        "result": None,
-        "error": None,
-        "user_email": user.get("email"),
-        "created_at": time.time(),
-    }
-    with _BACKTEST_JOBS_LOCK:
-        _evict_stale_backtest_jobs()
-        _BACKTEST_JOBS[job_id] = job
-    _db_backtest_job_upsert(
-        job_id, user.get("email", ""), payload.query, "queued",
-        phase="interpreting", total_symbols=job["total_symbols"],
+    return _start_async_backtest(
+        payload,
+        owner=user.get("email") or "",
+        pipeline_user=user,
+        user_id=_user_id_of(user),
+        anon_id=request.headers.get("x-anon-id"),
     )
-
-    def _progress(symbol: str) -> None:
-        """Engine progress callback: stream each completed symbol."""
-        with _BACKTEST_JOBS_LOCK:
-            cur = _BACKTEST_JOBS.get(job_id)
-            if cur is None:
-                return
-            if symbol not in cur["done_symbols"]:
-                cur["done_symbols"].append(symbol)
-            cur["phase"] = "backtesting"
-            cur["status"] = "running"
-
-    def _run() -> None:
-        from src.analytics import track
-
-        started = time.monotonic()
-        try:
-            with _BACKTEST_JOBS_LOCK:
-                _BACKTEST_JOBS[job_id]["status"] = "running"
-                _BACKTEST_JOBS[job_id]["phase"] = "interpreting"
-            strategy_rules, bt_results, screen_message, portfolio = _run_backtest_pipeline(
-                payload, user, progress_cb=_progress
-            )
-            result = _build_backtest_response(
-                payload, strategy_rules, bt_results, screen_message, portfolio
-            )
-            with _BACKTEST_JOBS_LOCK:
-                _BACKTEST_JOBS[job_id]["status"] = "done"
-                _BACKTEST_JOBS[job_id]["phase"] = "done"
-                _BACKTEST_JOBS[job_id]["result"] = result
-            _db_backtest_job_upsert(
-                job_id, user.get("email", ""), payload.query, "done",
-                phase="done", result=result,
-            )
-            track("backtest_completed", user_id=user_id,
-                  props={"symbols": symbols, "mode": "async"})
-            track("backtest_duration", user_id=user_id,
-                  props={"duration_ms": int((time.monotonic() - started) * 1000),
-                         "mode": "async"})
-        except Exception as e:  # noqa: BLE001 — job must always finalize
-            logger.error("Async backtest %s failed: %s", job_id, e)
-            with _BACKTEST_JOBS_LOCK:
-                _BACKTEST_JOBS[job_id]["status"] = "error"
-                _BACKTEST_JOBS[job_id]["error"] = str(e)[:500]
-            _db_backtest_job_upsert(
-                job_id, user.get("email", ""), payload.query, "error",
-                error=str(e)[:500],
-            )
-            track("backtest_failed", user_id=user_id,
-                  props={"mode": "async", "reason": _backtest_failure_reason(e)})
-
-    from src.analytics import track
-
-    user_id = _user_id_of(user)
-    symbols = int(job["total_symbols"])
-    track("backtest_started", user_id=user_id,
-          props={"symbols": symbols, "mode": "async"})
-    threading.Thread(target=_run, daemon=True).start()
-    return {
-        "job_id": job_id,
-        "status": "queued",
-        "phase": "interpreting",
-        "total_symbols": job["total_symbols"],
-    }
 
 
 @app.get(
@@ -3726,23 +3814,361 @@ async def backtest_async_status(
     """Poll an async backtest job for its current progress and, when done,
     the full result (identical payload shape to ``/backtest``).
     """
-    snapshot = _backtest_job_snapshot(job_id)
-    if not snapshot:
-        # In-memory entry evicted or lost on restart — try the DB.
-        snapshot = _load_backtest_job_from_db(job_id)
-    if not snapshot:
-        raise HTTPException(status_code=404, detail="Backtest job not found")
-    if snapshot.get("user_email") != user.get("email"):
-        raise HTTPException(status_code=404, detail="Backtest job not found")
+    return _job_status_payload(_owned_job_snapshot(job_id, user.get("email") or ""))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Day 6 — no signup wall, and shareable proof
+# ═══════════════════════════════════════════════════════════════════════════
+# A stranger runs real backtests before creating an account, then shares a
+# result as a link. Every wall placed before the moment of value costs roughly
+# half the funnel; queries here are nearly free, so the usual reason to gate
+# (cost) does not apply — but anonymous traffic is the first abuse surface a
+# bot finds, so it is held to tighter limits than signed-in traffic.
+#
+# Three layers keep it honest:
+#   1. ANON_BACKTEST_ALLOWANCE per trial session (the friendly limit — after
+#      it the UI asks for an account, "after value, never before");
+#   2. the "anon_backtest" per-IP scope, which a visitor cannot reset by
+#      throwing the session token away;
+#   3. the planet-wide backtest_llm bucket, shared with signed-in users.
+ANON_BACKTEST_ALLOWANCE = 3
+ANON_MAX_SYMBOLS = 5
+_SHARE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
+
+def _anon_owner(aid: str) -> str:
+    """The ``backtest_jobs.user_email`` value that marks a trial session's jobs."""
+    from src.database import ANON_OWNER_PREFIX
+
+    return ANON_OWNER_PREFIX + aid
+
+
+def _anon_id_from(request: Request) -> Optional[str]:
+    """The trial-session id from a valid ``X-Anon-Token`` header, else None."""
+    from src.auth import verify_anon_token
+
+    return verify_anon_token(request.headers.get("x-anon-token"))
+
+
+def _require_anon_id(request: Request) -> str:
+    aid = _anon_id_from(request)
+    if not aid:
+        raise HTTPException(
+            status_code=401,
+            detail="Start a free trial session first (POST /try/session).",
+        )
+    return aid
+
+
+def _count_owner_backtests(owner: str) -> int:
+    """Non-errored backtests ``owner`` has started — memory and DB, whichever
+    is higher (memory alone forgets on restart; the DB alone lags a new job)."""
+    with _BACKTEST_JOBS_LOCK:
+        in_memory = sum(
+            1 for j in _BACKTEST_JOBS.values()
+            if j.get("user_email") == owner and j.get("status") != "error"
+        )
+    stored = 0
+    if settings.has_database_url:
+        try:
+            from src.database import PostgresDB
+
+            stored = PostgresDB().count_owner_backtests(owner)
+        except Exception as e:  # noqa: BLE001 — fall back to the memory count
+            logger.warning("Trial allowance lookup failed: %s", e)
+    return max(in_memory, stored)
+
+
+@app.post(
+    "/try/session",
+    summary="Start an anonymous trial session (no account needed)",
+    tags=["Trial"],
+)
+async def try_session(request: Request, response: Response):
+    """Mint a signed trial token. Send it as ``X-Anon-Token`` on ``/try/*``
+    and ``/results/*`` calls. The id inside is generated here, never chosen
+    by the client, so nobody can claim another visitor's results."""
+    from src.auth import create_anon_token
+
+    if not settings.has_jwt_secret:
+        raise HTTPException(status_code=503, detail="Trials are not configured right now.")
+    minted = create_anon_token()
     return {
-        "job_id": snapshot["job_id"],
-        "status": snapshot["status"],
-        "phase": snapshot.get("phase"),
-        "done_symbols": snapshot.get("done_symbols", []),
-        "total_symbols": snapshot.get("total_symbols", 0),
-        "error": snapshot.get("error"),
-        "result": snapshot.get("result"),
+        "anon_token": minted["anon_token"],
+        "expires_in": minted["expires_in"],
+        "allowance": ANON_BACKTEST_ALLOWANCE,
     }
+
+
+@app.post(
+    "/try/backtest",
+    summary="Start a backtest without an account (trial allowance applies)",
+    tags=["Trial"],
+)
+async def try_backtest(request: Request, response: Response, payload: BacktestRequest):
+    """Same engine, same job flow as ``POST /backtest/async``, owned by the
+    trial session. Capped at ``ANON_MAX_SYMBOLS`` symbols; after
+    ``ANON_BACKTEST_ALLOWANCE`` runs it answers 403 asking for an account."""
+    aid = _require_anon_id(request)
+    owner = _anon_owner(aid)
+    used = _count_owner_backtests(owner)
+    if used >= ANON_BACKTEST_ALLOWANCE:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"You've used your {ANON_BACKTEST_ALLOWANCE} free backtests. Create a "
+                "free account to keep going — your results come with you."
+            ),
+        )
+    updates: Dict[str, Any] = {"top_n": min(payload.top_n, ANON_MAX_SYMBOLS)}
+    if payload.symbols:
+        updates["symbols"] = list(payload.symbols)[:ANON_MAX_SYMBOLS]
+    payload = payload.model_copy(update=updates)
+    started = _start_async_backtest(
+        payload,
+        owner=owner,
+        pipeline_user={"email": None, "plan": "trial"},
+        user_id=None,
+        anon_id=request.headers.get("x-anon-id"),
+    )
+    started["anon_remaining"] = max(0, ANON_BACKTEST_ALLOWANCE - used - 1)
+    return started
+
+
+@app.get(
+    "/try/backtest/{job_id}",
+    summary="Poll a trial backtest",
+    tags=["Trial"],
+)
+async def try_backtest_status(request: Request, response: Response, job_id: str):
+    """Poll a job this trial session owns (404 for anyone else's)."""
+    aid = _require_anon_id(request)
+    return _job_status_payload(_owned_job_snapshot(job_id, _anon_owner(aid)))
+
+
+@app.post(
+    "/try/claim",
+    summary="Move a trial session's backtests and share links into this account",
+    tags=["Trial"],
+)
+async def try_claim(
+    request: Request,
+    response: Response,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Called right after signup or login with both the account token and
+    the trial token, so nothing made before signing up is lost."""
+    from src.database import PostgresDB
+
+    aid = _require_anon_id(request)
+    owner = _anon_owner(aid)
+    email = user.get("email") or ""
+    with _BACKTEST_JOBS_LOCK:
+        moved = 0
+        for job in _BACKTEST_JOBS.values():
+            if job.get("user_email") == owner:
+                job["user_email"] = email
+                moved += 1
+    try:
+        counts = PostgresDB().claim_anonymous_work(aid, int(user["id"]), email)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Trial claim failed for user %s: %s", user.get("id"), e)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not move your trial results right now. Try again later.",
+        )
+    return {
+        "error": False,
+        "claimed_backtests": max(moved, int(counts.get("jobs", 0))),
+        "claimed_shares": int(counts.get("shares", 0)),
+    }
+
+
+def _share_owner(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """``(user, None)`` for an account, ``(None, anon_id)`` for a trial session.
+
+    An account token wins when both are present. A Bearer token that fails
+    validation is a 401 — never silently downgraded to the trial identity.
+    """
+    from src.auth import _extract_bearer_token
+
+    if _extract_bearer_token(request):
+        return get_current_user(request), None
+    aid = _anon_id_from(request)
+    if aid:
+        return None, aid
+    raise HTTPException(
+        status_code=401, detail="Sign in or start a free trial to share results."
+    )
+
+
+def _share_url(request: Request, share_id: str) -> str:
+    base = (settings.share_base_url or str(request.base_url)).rstrip("/")
+    return f"{base}/r/{share_id}"
+
+
+@app.post(
+    "/results/share",
+    summary="Publish one finished backtest as a public share link",
+    tags=["Sharing"],
+)
+async def share_result(request: Request, response: Response, payload: ShareRequest):
+    """Sharing is explicit opt-in: nothing is public until this is called.
+
+    The public page shows a whitelisted summary built HERE from the engine's
+    own stored result — the browser never supplies the numbers. Sharing the
+    same job twice returns the existing link.
+    """
+    from src.database import PostgresDB
+    from src.share_page import build_share_summary
+
+    user, aid = _share_owner(request)
+    owner = (user.get("email") or "") if user else _anon_owner(aid)
+    snapshot = _owned_job_snapshot(payload.job_id, owner)
+    result = snapshot.get("result")
+    if snapshot.get("status") != "done" or not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="This backtest hasn't finished yet.")
+    if not result.get("results"):
+        raise HTTPException(
+            status_code=422,
+            detail="There's nothing to share — this strategy matched no stocks.",
+        )
+    owner_user_id = int(user["id"]) if user else None
+    owner_anon = None if user else aid
+    try:
+        db = PostgresDB()
+        share_id = db.find_share_for_job(payload.job_id, owner_user_id, owner_anon)
+        if not share_id:
+            share_id = secrets.token_urlsafe(16)
+            summary = build_share_summary(result)
+            db.create_share(
+                share_id, payload.job_id, owner_user_id, owner_anon,
+                summary["query"], summary,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Share creation failed: %s", e)
+        raise HTTPException(
+            status_code=502, detail="Could not create a share link right now. Try again later."
+        )
+    return {"error": False, "share_id": share_id, "url": _share_url(request, share_id)}
+
+
+@app.delete(
+    "/results/share/{share_id}",
+    summary="Revoke a share link (the link stops working for everyone)",
+    tags=["Sharing"],
+)
+async def revoke_share(request: Request, response: Response, share_id: str):
+    """Owner-only. Anyone else's request matches nothing and gets 404."""
+    from src.database import PostgresDB
+
+    user, aid = _share_owner(request)
+    if not _SHARE_ID_RE.match(share_id):
+        raise HTTPException(status_code=404, detail="Share link not found")
+    try:
+        deleted = PostgresDB().delete_share(
+            share_id, int(user["id"]) if user else None, None if user else aid
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Share revoke failed: %s", e)
+        raise HTTPException(
+            status_code=502, detail="Could not revoke that link right now. Try again later."
+        )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    return {"error": False, "message": "That link no longer works."}
+
+
+@app.get(
+    "/results/shares",
+    summary="List my live share links",
+    tags=["Sharing"],
+)
+async def list_my_shares(request: Request, response: Response):
+    from src.database import PostgresDB
+
+    user, aid = _share_owner(request)
+    try:
+        rows = PostgresDB().list_shares(
+            int(user["id"]) if user else None, None if user else aid
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Share listing failed: %s", e)
+        raise HTTPException(status_code=502, detail="Could not load your links right now.")
+    return {
+        "shares": [
+            {
+                "share_id": r["share_id"],
+                "url": _share_url(request, r["share_id"]),
+                "query": r.get("query"),
+                "created_at": str(r.get("created_at") or ""),
+                "headline": (r.get("summary") or {}).get("headline"),
+            }
+            for r in rows
+        ]
+    }
+
+
+# The page carries text a stranger wrote (the query). It is escaped, and this
+# CSP is the second wall: no script of any kind may run, nothing may be
+# loaded from elsewhere, and the page cannot be framed.
+_SHARE_PAGE_HEADERS = {
+    "Cache-Control": "public, max-age=300",
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+}
+
+
+def _load_public_share(share_id: str) -> Dict[str, Any]:
+    """The stored public summary for ``share_id``, or 404."""
+    from src.database import PostgresDB
+
+    if not _SHARE_ID_RE.match(share_id):
+        raise HTTPException(status_code=404, detail="Share link not found")
+    try:
+        row = PostgresDB().get_share(share_id)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Share lookup failed: %s", e)
+        raise HTTPException(status_code=502, detail="Could not load this result right now.")
+    if not row or not isinstance(row.get("summary"), dict):
+        raise HTTPException(status_code=404, detail="Share link not found")
+    return row
+
+
+@app.get(
+    "/r/{share_id}.json",
+    summary="Public share payload (JSON)",
+    tags=["Sharing"],
+)
+async def public_share_json(request: Request, response: Response, share_id: str):
+    """Exactly the whitelisted summary — no email, user id, job id or trial id."""
+    row = _load_public_share(share_id)
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return {"share_id": row["share_id"], **row["summary"]}
+
+
+@app.get(
+    "/r/{share_id}",
+    summary="Public share page (server-rendered HTML)",
+    tags=["Sharing"],
+    response_class=HTMLResponse,
+)
+async def public_share_page(request: Request, response: Response, share_id: str):
+    """Rendered on the server so link-preview crawlers see real content."""
+    from src.share_page import render_share_page
+
+    row = _load_public_share(share_id)
+    page = render_share_page(
+        row["summary"],
+        page_url=_share_url(request, share_id),
+        app_url=settings.app_base_url,
+    )
+    return HTMLResponse(page, headers=_SHARE_PAGE_HEADERS)
 
 
 @app.post(

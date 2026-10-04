@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     sendgrid_api_key: str = ""
     email_from_address: str = ""
     app_base_url: str = "http://localhost:3000"
+    # Public origin that serves share links (GET /r/{share_id}). The API
+    # renders those pages itself (server-side, for link-preview crawlers), so
+    # this is the API's PUBLIC address — e.g. https://api.stratoscan.app.
+    # Blank = the origin the request arrived on (fine locally).
+    share_base_url: str = ""
     email_verification_required: bool = False
     email_verification_token_ttl_hours: int = 24  # link expires after 24h
 

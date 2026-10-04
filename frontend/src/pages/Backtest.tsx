@@ -13,6 +13,7 @@ import {
   Layers,
   LineChart,
   Link2,
+  Link2Off,
   Loader2,
   PieChart,
   RotateCw,
@@ -41,17 +42,21 @@ import { SplitPane } from '@/components/backtest/SplitPane'
 import { ChatPanel, type ChatMessage } from '@/components/backtest/ChatPanel'
 import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
+import { TrialBanner } from '@/components/backtest/TrialBanner'
 import {
   backtest,
   backtestAsync,
   backtestJobStatus,
   downloadBlob,
   exportBacktestCsv,
+  revokeShare,
+  shareResult,
 } from '@/lib/api/services'
 import { delay, toApiError, DEMO_MODE } from '@/lib/api/client'
 import { track } from '@/lib/analytics'
 import { toast } from '@/store/notifications'
 import { usePersonal } from '@/store/personal'
+import { useAuth } from '@/store/auth'
 import { useRateLimit, useRateLimitCountdown } from '@/store/rateLimit'
 import type {
   BacktestJobStatus,
@@ -114,6 +119,14 @@ export function Backtest() {
   const [baseline, setBaseline] = useState<BacktestResponse | null>(null)
   const [exporting, setExporting] = useState(false)
   const [copied, setCopied] = useState(false)
+  // Day 6: signed-out visitors run as a free trial; a finished run can be
+  // published as a public link (server-built page) and un-published again.
+  const signedIn = useAuth((s) => s.token !== null)
+  const [lastJobId, setLastJobId] = useState<string | null>(null)
+  const [share, setShare] = useState<{ share_id: string; url: string } | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [trialLeft, setTrialLeft] = useState<number | null>(null)
+  const [trialExhausted, setTrialExhausted] = useState(false)
 
   // Tier 3 shareable links: hydrate the tune drawer from URL params when a
   // shared link lands (q triggers the run via the existing effect below).
@@ -178,6 +191,8 @@ export function Backtest() {
     setLoading(true)
     setError(null)
     setJobStatus(null)
+    setLastJobId(null)
+    setShare(null)
     pushMsg('user', trimmed)
     try {
       const req = buildRequest(trimmed)
@@ -189,6 +204,7 @@ export function Backtest() {
         // user sees live status instead of a silent 20-minute wait.
         const started = await backtestAsync(req)
         if (id !== runId.current) return
+        if (typeof started.anon_remaining === 'number') setTrialLeft(started.anon_remaining)
         setJobStatus({
           job_id: started.job_id,
           status: started.status as BacktestJobStatus['status'],
@@ -204,6 +220,7 @@ export function Backtest() {
           setJobStatus(status)
           if (status.status === 'done') {
             res = status.result as BacktestResponse
+            setLastJobId(started.job_id)
             break
           }
           if (status.status === 'error') {
@@ -247,6 +264,14 @@ export function Backtest() {
       if (id !== runId.current) return
       const apiErr = toApiError(err)
       setError(apiErr.message)
+      if (apiErr.status === 403 && !signedIn) {
+        // The trial allowance is spent: the server's own sentence says so and
+        // the banner turns into the signup ask. Not an error in the UI sense.
+        setTrialExhausted(true)
+        setTrialLeft(0)
+        pushMsg('assistant', apiErr.message)
+        return
+      }
       pushMsg('assistant', `Something went wrong: ${apiErr.message}`)
       if (apiErr.status === 429) {
         // Hold the shared gate for the backend's Retry-After window, then
@@ -997,7 +1022,10 @@ export function Backtest() {
                   }
                 }}
                 loading={exporting}
-                disabled={pending}
+                disabled={pending || (!signedIn && !DEMO_MODE)}
+                title={
+                  !signedIn && !DEMO_MODE ? 'Create a free account to export trades' : undefined
+                }
               >
                 {!exporting && <Download className="h-3.5 w-3.5" aria-hidden="true" />} Export CSV
               </Button>
@@ -1016,16 +1044,38 @@ export function Backtest() {
               >
                 <GitCompareArrows className="h-3.5 w-3.5" aria-hidden="true" /> Set as baseline
               </Button>
-              {/* Tier 3: shareable link (params sync through /me/personal + URL) */}
+              {/* Day 6: publish this result as a public, server-rendered page.
+                  Demo mode (no server) falls back to the setup link, which
+                  re-runs the same strategy rather than showing this result. */}
               <Button
                 variant="outline"
                 size="sm"
+                loading={sharing}
                 onClick={async () => {
-                  const url = `${window.location.origin}${window.location.pathname}?${serializeParams(buildRequest(lastQuery.current))}`
+                  let url: string
+                  if (!DEMO_MODE && lastJobId) {
+                    setSharing(true)
+                    try {
+                      const link = await shareResult(lastJobId)
+                      setShare(link)
+                      url = link.url
+                    } catch (err) {
+                      toast.error('Could not share', toApiError(err).message)
+                      return
+                    } finally {
+                      setSharing(false)
+                    }
+                  } else {
+                    url = `${window.location.origin}${window.location.pathname}?${serializeParams(buildRequest(lastQuery.current))}`
+                  }
                   try {
                     await navigator.clipboard.writeText(url)
                     setCopied(true)
                     setTimeout(() => setCopied(false), 2000)
+                    toast.success(
+                      'Link copied',
+                      'Anyone with the link can see this result. You can stop sharing anytime.',
+                    )
                   } catch {
                     window.prompt('Copy your shareable backtest link:', url)
                   }
@@ -1035,15 +1085,33 @@ export function Backtest() {
                   // nothing to describe that would not be user content.
                   track('result_shared')
                 }}
-                disabled={!result}
+                disabled={!result || loading || sharing || result.total_symbols_tested === 0}
               >
-                {copied ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-gain-soft" aria-hidden="true" />
-                ) : (
-                  <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                {copied ? 'Copied' : 'Share link'}
+                {!sharing &&
+                  (copied ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-gain-soft" aria-hidden="true" />
+                  ) : (
+                    <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  ))}
+                {copied ? 'Copied' : share ? 'Copy link' : 'Share result'}
               </Button>
+              {share && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await revokeShare(share.share_id)
+                      setShare(null)
+                      toast.success('Sharing stopped', 'That link no longer works for anyone.')
+                    } catch (err) {
+                      toast.error('Could not stop sharing', toApiError(err).message)
+                    }
+                  }}
+                >
+                  <Link2Off className="h-3.5 w-3.5" aria-hidden="true" /> Stop sharing
+                </Button>
+              )}
               {result && (
                 <Badge variant="neutral" className="text-[11px] normal-case">
                   {fmtPct(active?.total_return_pct ?? 0)} · {active?.total_trades ?? 0} trades · 10y
@@ -1090,6 +1158,7 @@ export function Backtest() {
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
+      {!signedIn && !DEMO_MODE && <TrialBanner left={trialLeft} exhausted={trialExhausted} />}
       {/* Mobile: stacked */}
       <div data-layout="mobile" className="flex min-h-0 flex-1 flex-col gap-3 lg:hidden">
         <div className="h-[360px] shrink-0">{chatPane}</div>

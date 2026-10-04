@@ -3,6 +3,19 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 6 — No signup wall, and shareable proof
+
+**Shipped:** `/try` — the real backtester for strangers: three free runs on a signed trial
+token (never accepted as a session, and vice versa), a countdown banner, and the account ask
+only after the third result. Share links: opt-in, a server-built whitelist summary (no email,
+ids or trade log), a server-rendered page with the disclaimer beside the numbers and a
+script-free CSP, revocable, killed with the account. Signing up claims the trial's runs and
+links. 50/50 backend (13/13 mutations caught), 254/254 frontend; live E2E across a restart.
+
+**Broke / found:** every finished async backtest failed to persist — the job stored a Pydantic
+model that `json.dumps` cannot serialize, the upsert swallowed the error, so a restart lost the
+result (and nothing could have been shared). Async failures also returned raw exception text.
+
 ## Day 4 — Instrumentation and the legal floor
 
 **Shipped (Freebuff, reviewed):** the plan's fifteen funnel events through one `track()`, with

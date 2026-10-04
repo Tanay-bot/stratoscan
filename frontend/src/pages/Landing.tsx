@@ -110,10 +110,12 @@ export function Landing() {
       toasts.push('info', 'Type an idea to screen', 'Try one of the example queries below.')
       return
     }
+    // Signed out, the idea goes straight into a free backtest (Day 6: no
+    // signup wall) — the account ask comes after the result, never before.
     navigate(
       user
         ? `/app/screener?q=${encodeURIComponent(trimmed)}`
-        : `/login?next=${encodeURIComponent(`/app/screener?q=${encodeURIComponent(trimmed)}`)}`,
+        : `/try?q=${encodeURIComponent(trimmed)}`,
     )
   }
 
@@ -401,8 +403,8 @@ export function Landing() {
             catch.
           </p>
           <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Button size="lg" onClick={() => navigate('/signup')}>
-              Start screening free <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            <Button size="lg" onClick={() => navigate(user ? '/app/backtest' : '/try')}>
+              Try it free — no signup <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Button>
             <Button size="lg" variant="outline" onClick={() => navigate('/login')}>
               Log in

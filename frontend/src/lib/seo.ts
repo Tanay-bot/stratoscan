@@ -91,6 +91,13 @@ const PUBLIC: RouteMeta[] = [
     noindex: false,
   },
   {
+    path: '/try',
+    title: 'Backtest a Strategy Free, No Signup — Stratoscan',
+    description:
+      'Describe a stock strategy in plain English and see how it did over 10 years against SPY — with fees and slippage. Three free backtests, no account needed.',
+    noindex: false,
+  },
+  {
     path: '/login',
     title: 'Log In — Stratoscan',
     description:

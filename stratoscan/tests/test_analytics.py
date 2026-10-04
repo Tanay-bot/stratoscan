@@ -461,7 +461,7 @@ for f in sorted(versions.glob("*.py")):
 revs = [r for _, r, _ in migs]
 downs = [d for _, _, d in migs if d]
 heads = [r for r in revs if r not in downs]
-assert heads == ["f4a5b6c7d8e9"], heads
+assert len(heads) == 1, f"migrations must form one chain: {heads}"
 events_mig = next(m for m in migs if m[1] == "f4a5b6c7d8e9")
 assert events_mig[2] == "e3f4a5b6c7d8", events_mig  # chains after google_sub
 body = (versions / events_mig[0]).read_text(encoding="utf-8")

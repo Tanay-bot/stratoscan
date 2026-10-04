@@ -229,11 +229,7 @@ export function BacktestLoop() {
       </div>
 
       <div className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
-        <Button
-          size="lg"
-          variant="grape"
-          onClick={() => navigate(user ? '/app/backtest' : '/login?next=/app/backtest')}
-        >
+        <Button size="lg" variant="grape" onClick={() => navigate(user ? '/app/backtest' : '/try')}>
           Open the backtester <ArrowRight className="h-4 w-4" aria-hidden="true" />
         </Button>
         <button

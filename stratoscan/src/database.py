@@ -15,6 +15,7 @@ Supabase REST API), so any PostgreSQL provider works in production.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import threading
@@ -652,6 +653,57 @@ ERROR_LOG_INDEXES = [
 ]
 
 
+# ── Shared results (Day 6: shareable proof) ──────────────────────────────────
+# A result becomes public ONLY when its owner presses share. Each share gets a
+# fresh random ``share_id`` (128 bits, URL-safe) — never the job id, never a
+# sequential number — so the id space cannot be walked. Revoking DELETES the
+# row: the old link is dead for good, and sharing again mints a new id.
+#
+# ``summary`` is built server-side from the engine's own result by a field
+# whitelist (``share_page.build_share_summary``). A browser never supplies the numbers on
+# a share page, so nobody can publish a fake 900% return under our domain.
+#
+# Owner is either an account (``owner_user_id``, CASCADE: links die with the
+# account) or an anonymous trial session (``owner_anon``), claimed into the
+# account at signup.
+SHARED_RESULTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS shared_results (
+    share_id      TEXT PRIMARY KEY,
+    job_id        TEXT NOT NULL,
+    owner_user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+    owner_anon    TEXT,
+    query         TEXT NOT NULL,
+    summary       JSONB NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
+SHARED_RESULTS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_shared_results_owner_user "
+    "ON shared_results (owner_user_id);",
+    "CREATE INDEX IF NOT EXISTS idx_shared_results_owner_anon "
+    "ON shared_results (owner_anon);",
+    "CREATE INDEX IF NOT EXISTS idx_shared_results_job "
+    "ON shared_results (job_id);",
+]
+
+# Async-job owner key for an anonymous trial session. Stored in
+# ``backtest_jobs.user_email`` (an owner column in practice): it can never
+# collide with a real address because it contains no "@".
+ANON_OWNER_PREFIX = "anon:"
+
+
+def _share_owner_where(
+    owner_user_id: Optional[int], owner_anon: Optional[str]
+) -> Tuple[Optional[str], List[Any]]:
+    """Owner predicate for shared_results; (None, []) means "no owner" -> 0 rows."""
+    if owner_user_id is not None:
+        return "owner_user_id = %s", [owner_user_id]
+    if owner_anon:
+        return "owner_anon = %s", [owner_anon]
+    return None, []
+
+
 def _event_identity_where(
     user_id: Optional[int], anon_id: Optional[str]
 ) -> Tuple[Optional[str], List[Any]]:
@@ -791,10 +843,14 @@ class PostgresDB:
                 cur.execute(ERROR_LOG_SCHEMA)
                 for idx in ERROR_LOG_INDEXES:
                     cur.execute(idx)
+                # After users (FK on owner_user_id).
+                cur.execute(SHARED_RESULTS_SCHEMA)
+                for idx in SHARED_RESULTS_INDEXES:
+                    cur.execute(idx)
             conn.commit()
         logger.info(
             "PostgreSQL stock_master + users + job monitoring + backtest_jobs "
-            "+ events + error_log schema initialized"
+            "+ events + error_log + shared_results schema initialized"
         )
 
     # ── User CRUD (auth) ──────────────────────────────────────────────
@@ -1315,6 +1371,10 @@ class PostgresDB:
                         "(SELECT email FROM users WHERE id = %s)",
                         (user_id,),
                     )
+                    # ...and any public links the squatter published.
+                    cur.execute(
+                        "DELETE FROM shared_results WHERE owner_user_id = %s", (user_id,)
+                    )
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -1400,6 +1460,128 @@ class PostgresDB:
                 raise
         logger.info("Deleted user %d (%d backtest jobs)", user_id, jobs)
         return {"users": users, "backtest_jobs": jobs}
+
+    # ── Anonymous trials & shared results (Day 6) ───────────────────
+
+    def count_owner_backtests(self, owner: str) -> int:
+        """Backtests this owner has started that did not error.
+
+        Errors are excluded on purpose: an engine failure delivered nothing,
+        so it should not spend one of an anonymous visitor's free runs.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM backtest_jobs "
+                    "WHERE user_email = %s AND status <> 'error'",
+                    (owner,),
+                )
+                return int(cur.fetchone()[0] or 0)
+
+    def create_share(
+        self, share_id: str, job_id: str, owner_user_id: Optional[int],
+        owner_anon: Optional[str], query: str, summary: Dict[str, Any],
+    ) -> None:
+        """Publish one result under ``share_id``."""
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO shared_results "
+                    "(share_id, job_id, owner_user_id, owner_anon, query, summary) "
+                    "VALUES (%s, %s, %s, %s, %s, %s::jsonb)",
+                    (share_id, job_id, owner_user_id, owner_anon, query,
+                     json.dumps(summary)),
+                )
+            conn.commit()
+
+    def find_share_for_job(
+        self, job_id: str, owner_user_id: Optional[int], owner_anon: Optional[str]
+    ) -> Optional[str]:
+        """The live share_id this owner already has for ``job_id``, if any."""
+        where, params = _share_owner_where(owner_user_id, owner_anon)
+        if where is None:
+            return None
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT share_id FROM shared_results WHERE job_id = %s AND {where} "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (job_id, *params),
+                )
+                row = cur.fetchone()
+        return row[0] if row else None
+
+    def get_share(self, share_id: str) -> Optional[Dict[str, Any]]:
+        """Public read. Deliberately returns NO owner columns and no job id."""
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT share_id, query, summary, created_at "
+                    "FROM shared_results WHERE share_id = %s",
+                    (share_id,),
+                )
+                row = cur.fetchone()
+        return dict(row) if row else None
+
+    def delete_share(
+        self, share_id: str, owner_user_id: Optional[int], owner_anon: Optional[str]
+    ) -> bool:
+        """Revoke a share. Owner-scoped in the WHERE clause itself, so a
+        non-owner's request matches nothing and changes nothing."""
+        where, params = _share_owner_where(owner_user_id, owner_anon)
+        if where is None:
+            return False
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"DELETE FROM shared_results WHERE share_id = %s AND {where}",
+                    (share_id, *params),
+                )
+                deleted = cur.rowcount
+            conn.commit()
+        return deleted > 0
+
+    def list_shares(
+        self, owner_user_id: Optional[int], owner_anon: Optional[str], limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """This owner's live shares, newest first."""
+        where, params = _share_owner_where(owner_user_id, owner_anon)
+        if where is None:
+            return []
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    f"SELECT share_id, query, summary, created_at FROM shared_results "
+                    f"WHERE {where} ORDER BY created_at DESC LIMIT %s",
+                    (*params, limit),
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+    def claim_anonymous_work(self, anon_id: str, user_id: int, email: str) -> Dict[str, int]:
+        """Move an anonymous trial's backtests and shares into an account.
+
+        One transaction: either everything the visitor made comes with them,
+        or nothing moves.
+        """
+        with self._get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE backtest_jobs SET user_email = %s WHERE user_email = %s",
+                        (email, ANON_OWNER_PREFIX + anon_id),
+                    )
+                    jobs = cur.rowcount
+                    cur.execute(
+                        "UPDATE shared_results SET owner_user_id = %s, owner_anon = NULL "
+                        "WHERE owner_anon = %s",
+                        (user_id, anon_id),
+                    )
+                    shares = cur.rowcount
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return {"jobs": jobs, "shares": shares}
 
     # ── Per-user saved data (watchlist / screeners / backtests) ────────
 

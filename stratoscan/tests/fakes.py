@@ -69,6 +69,10 @@ class FakeUserDB:
     def __init__(self) -> None:
         self._users: Dict[str, Dict[str, Any]] = {}
         self._personal: Dict[int, Dict[str, Any]] = {}
+        # Day 6: backtest_jobs owner rows and shared_results, by primary key.
+        self.jobs: Dict[str, Dict[str, Any]] = {}
+        self.shares: Dict[str, Dict[str, Any]] = {}
+        self._share_seq = 0
         self._next_id = 1
 
     def _store(
@@ -272,6 +276,7 @@ class FakeUserDB:
                 user["reset_token_expires"] = None
                 user["token_version"] += 1
                 self._personal.pop(user_id, None)  # squatter's saved state goes
+                self._drop_shares(owner_user_id=user_id)
                 return user["token_version"]
         return 0
 
@@ -293,7 +298,79 @@ class FakeUserDB:
                 del self._users[key]
                 removed = 1
         self._personal.pop(user_id, None)
-        return {"users": removed, "backtest_jobs": 0}
+        self._drop_shares(owner_user_id=user_id)  # ON DELETE CASCADE
+        jobs = [j for j, row in self.jobs.items() if row["user_email"] == email]
+        for job_id in jobs:
+            del self.jobs[job_id]
+        return {"users": removed, "backtest_jobs": len(jobs)}
+
+    # ── Anonymous trials & shared results (Day 6) ───────────────────
+    # Mirrors the PostgresDB methods of the same names, including the owner
+    # scoping that lives in their WHERE clauses.
+
+    def _owned(self, row: Dict[str, Any], owner_user_id: Optional[int],
+               owner_anon: Optional[str]) -> bool:
+        if owner_user_id is not None:
+            return row["owner_user_id"] == owner_user_id
+        if owner_anon:
+            return row["owner_anon"] == owner_anon
+        return False
+
+    def _drop_shares(self, *, owner_user_id: int) -> None:
+        for share_id in [k for k, r in self.shares.items()
+                         if r["owner_user_id"] == owner_user_id]:
+            del self.shares[share_id]
+
+    def count_owner_backtests(self, owner: str) -> int:
+        return sum(1 for r in self.jobs.values()
+                   if r["user_email"] == owner and r.get("status") != "error")
+
+    def create_share(self, share_id, job_id, owner_user_id, owner_anon, query, summary) -> None:
+        if share_id in self.shares:
+            raise ValueError('duplicate key value violates unique constraint "shared_results_pkey"')
+        self._share_seq += 1
+        self.shares[share_id] = {
+            "share_id": share_id, "job_id": job_id, "owner_user_id": owner_user_id,
+            "owner_anon": owner_anon, "query": query, "summary": summary,
+            "created_at": self._share_seq,
+        }
+
+    def find_share_for_job(self, job_id, owner_user_id, owner_anon) -> Optional[str]:
+        rows = [r for r in self.shares.values()
+                if r["job_id"] == job_id and self._owned(r, owner_user_id, owner_anon)]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return rows[0]["share_id"] if rows else None
+
+    def get_share(self, share_id: str) -> Optional[Dict[str, Any]]:
+        row = self.shares.get(share_id)
+        if not row:
+            return None
+        return {k: row[k] for k in ("share_id", "query", "summary", "created_at")}
+
+    def delete_share(self, share_id, owner_user_id, owner_anon) -> bool:
+        row = self.shares.get(share_id)
+        if row and self._owned(row, owner_user_id, owner_anon):
+            del self.shares[share_id]
+            return True
+        return False
+
+    def list_shares(self, owner_user_id, owner_anon, limit: int = 100) -> List[Dict[str, Any]]:
+        rows = [r for r in self.shares.values() if self._owned(r, owner_user_id, owner_anon)]
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return [{k: r[k] for k in ("share_id", "query", "summary", "created_at")}
+                for r in rows[:limit]]
+
+    def claim_anonymous_work(self, anon_id: str, user_id: int, email: str) -> Dict[str, int]:
+        jobs = shares = 0
+        for row in self.jobs.values():
+            if row["user_email"] == "anon:" + anon_id:
+                row["user_email"] = email
+                jobs += 1
+        for row in self.shares.values():
+            if row["owner_anon"] == anon_id:
+                row["owner_user_id"], row["owner_anon"] = user_id, None
+                shares += 1
+        return {"jobs": jobs, "shares": shares}
 
     def list_users(
         self, limit: int = 50, offset: int = 0, search: str | None = None

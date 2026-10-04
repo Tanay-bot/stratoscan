@@ -29,8 +29,9 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 
 | Auth level | Meaning | Endpoints |
 |---|---|---|
-| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback` |
-| `bearer` | Valid JWT required (401 without) | `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal` |
+| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback`, `/try/session`, `/r/{share_id}`, `/r/{share_id}.json` |
+| `trial` | `X-Anon-Token` from `POST /try/session` (401 without); `/results/*` also accept a Bearer token instead | `/try/backtest`, `/try/backtest/{job_id}`, `/results/share`, `/results/share/{share_id}`, `/results/shares` |
+| `bearer` | Valid JWT required (401 without) | `/try/claim` (plus `X-Anon-Token`), `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -224,6 +225,55 @@ Response per symbol includes `total_return_pct`, `sharpe_ratio`,
 payload in `result`) | `error` | `interrupted`. `interrupted` means the server
 restarted mid-job — re-submit. Jobs are persisted (`backtest_jobs`), so a poll
 survives a restart.
+
+A failed job's `error` is safe to show: a request problem (4xx) carries its
+own sentence; anything unexpected is a generic message — never exception text.
+
+### No signup wall — `/try/*` (trial token)
+
+A visitor without an account gets a small free allowance of real backtests.
+
+1. `POST /try/session` → `{anon_token, expires_in, allowance}` (allowance `3`,
+   token valid 30 days). Store it; send it as **`X-Anon-Token`** — never as
+   `Authorization`, where it is refused. It is a credential (it owns jobs and
+   share links), not the analytics id `X-Anon-Id`.
+2. `POST /try/backtest` — same body and response as `/backtest/async`, plus
+   `anon_remaining`. `top_n` and `symbols` are capped at 5. Once the allowance
+   is spent it answers **403** with a sentence to show next to a signup button.
+   Errored runs do not spend the allowance.
+3. `GET /try/backtest/{job_id}` — poll, same shape as `/backtest/async/{job_id}`.
+   404 for any job this trial session does not own.
+4. After signup or login, `POST /try/claim` with **both** `Authorization` and
+   `X-Anon-Token` → `{claimed_backtests, claimed_shares}`: the trial's jobs and
+   share links move into the account. Then discard the trial token. A 401 here
+   means the *trial* token is missing or stale — not that the session expired.
+
+### Share links — `/results/*` and the public `/r/{share_id}`
+
+Nothing is public until its owner asks. Owner = the Bearer account, else the
+trial session (a Bearer token that fails validation is a 401, never a silent
+fallback to the trial identity).
+
+- `POST /results/share` `{job_id}` → `{share_id, url}` for a finished job you
+  own (404 otherwise, 409 while running, 422 when it matched no stocks).
+  Sharing the same job again returns the same link. The browser sends only the
+  job id: the public numbers are built server-side from the engine's stored
+  result by a field whitelist.
+- `DELETE /results/share/{share_id}` — revoke; the link is dead for everyone,
+  and sharing again mints a new id. 404 for a link you do not own.
+- `GET /results/shares` → `{shares: [{share_id, url, query, created_at, headline}]}`.
+- `GET /r/{share_id}` — the public page: server-rendered HTML (so link
+  previews see real content), `noindex`, a script-free CSP, the risk
+  disclaimer next to the numbers, and a "run this yourself" link to
+  `{APP_BASE_URL}/try?q=…`. `GET /r/{share_id}.json` is the same summary as
+  JSON: `{share_id, query, basis, symbols, symbols_tested, headline{total_return_pct,
+  benchmark_total_return_pct, excess_return_pct, sharpe_ratio, max_drawdown_pct,
+  win_rate_pct, total_trades}, period{start,end}, equity_curve}` — no email,
+  user id, job id, trial id or trade log, ever.
+
+`url` uses `SHARE_BASE_URL` (the API's public origin) when set, else the
+request's own origin. Share ids are 128-bit random; deleting an account
+deletes its links.
 
 ### `GET /me/personal` and `PUT /me/personal` — per-user saved state (bearer)
 
@@ -424,10 +474,13 @@ ratelimit-reset: 1785946800
 
 Budgets (per scope, from `/meta`): `screen 5/min · 50/day`,
 `interpret 10/min · 100/day`, `enrich 3/min · 20/day`,
-`backtest 2/min · 10/day` (starting a job), `backtest_poll 120/min` (`GET /backtest/async/{job_id}` — polling never spends the backtest budget), `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
+`backtest 2/min · 10/day` (starting a job), `backtest_poll 120/min` (`GET /backtest/async/{job_id}` and `GET /try/backtest/{job_id}` — polling never spends the backtest budget),
+`anon_backtest 2/min · 6/day` (`POST /try/backtest`; per IP, so a fresh trial token does not reset it; the daily cap sits above the 3-run allowance so the friendly 403 comes first),
+`share 10/min · 100/day` (`/results/*`; the public `/r/*` pages are `read`), `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
 `auth 10/min · 50/day`, `register 3/min · 10/day`, `auth_mail 3/min · 10/day`
 (`/auth/password-reset/*`, `/auth/resend-verification`). Global shared buckets additionally cap usage
-across all users (`screener_llm` 900/day, `backtest_llm` 200/day, and
+across all users (`screener_llm` 900/day, `backtest_llm` 200/day — shared by
+`backtest` and `anon_backtest` — and
 `auth_register` 50/day, which `register` and `auth_mail` share because both
 send email). `OPTIONS` preflights are never counted.
 

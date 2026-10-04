@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 import time
 from typing import Any, Dict, List, Optional
 from unittest import mock
@@ -180,13 +181,15 @@ with mock.patch("src.interpreter.interpret_query", return_value=_FakeInterpreted
         assert set(snap["done_symbols"]) == set(engine.progress_fired), (
             snap["done_symbols"], engine.progress_fired
         )
-        # The final payload is the exact sync /backtest shape. (Direct
-        # endpoint call → the Pydantic model, which FastAPI serializes to
-        # the same JSON dict over HTTP.)
+        # The final payload is the exact sync /backtest shape, stored as the
+        # JSON dict a client receives — a Pydantic model here could not be
+        # json.dumps()'d into backtest_jobs, so the result was lost on restart.
         result = snap["result"]
-        assert result.query == "buy oversold stocks"
-        assert result.total_symbols_tested == 2
-        assert "TEST" in result.results or len(result.results) >= 0
+        assert isinstance(result, dict), type(result)
+        json.dumps(result)
+        assert result["query"] == "buy oversold stocks"
+        assert result["total_symbols_tested"] == 2
+        assert set(result) >= {"query", "strategy", "results", "total_symbols_tested"}
 
         # Wrong user → 404 (job ownership).
         other = _FakeUser()

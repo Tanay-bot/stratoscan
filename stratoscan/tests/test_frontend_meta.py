@@ -76,6 +76,13 @@ assert by_path["/admin/users"]["auth"] == "admin"
 assert by_path["/admin/overview"]["auth"] == "admin"
 assert by_path["/screen"]["auth"] == "none"
 assert by_path["/auth/me"]["auth"] == "bearer"
+# Day 6: trial routes take X-Anon-Token; claiming needs the account too;
+# the public share page and the session mint need nothing.
+assert by_path["/try/backtest"]["auth"] == "trial"
+assert by_path["/results/share"]["auth"] == "trial"
+assert by_path["/try/claim"]["auth"] == "bearer"
+assert by_path["/try/session"]["auth"] == "none"
+assert by_path["/r/{share_id}"]["auth"] == "none"
 _result("GET /meta endpoint catalog complete + auth-classified", True)
 
 # Sortable columns match what the screener actually accepts.

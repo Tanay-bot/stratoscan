@@ -114,6 +114,31 @@ export interface BacktestJobStatus {
   result?: BacktestResponse | null
 }
 
+/** Response of POST /backtest/async and POST /try/backtest. */
+export interface BacktestJobStarted {
+  job_id: string
+  status: string
+  phase?: string
+  total_symbols?: number
+  /** Trial runs only: free backtests left after this one. */
+  anon_remaining?: number
+}
+
+/** A public share link (POST /results/share, GET /results/shares). */
+export interface ShareLink {
+  share_id: string
+  url: string
+}
+
+export interface ShareListItem extends ShareLink {
+  query: string
+  created_at: string
+  headline: {
+    total_return_pct: number | null
+    benchmark_total_return_pct: number | null
+  } | null
+}
+
 export interface PortfolioSummary {
   allocation: 'equal' | 'risk_based'
   rebalance: 'none' | 'monthly' | 'quarterly' | 'yearly'

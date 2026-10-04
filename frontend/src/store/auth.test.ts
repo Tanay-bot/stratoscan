@@ -17,6 +17,7 @@ vi.mock('@/lib/api/services', () => ({
   })),
   me: vi.fn(async () => ({ id: 1, email: 'a@b.co', plan: 'free', email_verified: true })),
   requiresAuth: vi.fn(() => true),
+  claimTrialWork: vi.fn(async () => null),
 }))
 
 // Force the real (non-demo) auth branch: the dev .env.local sets

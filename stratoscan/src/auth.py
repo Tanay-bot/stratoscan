@@ -209,6 +209,67 @@ def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# ── Anonymous trial tokens (Day 6: no signup wall) ───────────────────────────
+# A stranger can run a few real backtests before creating an account. Their
+# results need an owner — so they can share them, and later claim them into
+# an account — but there is no user row to point at. The server mints a
+# signed token carrying a random anonymous id instead.
+#
+# Two properties make this safe:
+#   - The id is SERVER-generated and signed, so a client cannot choose
+#     someone else's id and claim their results.
+#   - ``typ: "anon"`` keeps the two token kinds apart in both directions:
+#     ``get_current_user`` rejects anon tokens, and ``verify_anon_token``
+#     rejects account tokens. Neither can stand in for the other.
+ANON_TOKEN_TYPE = "anon"
+ANON_TOKEN_TTL_SECONDS = 30 * 24 * 3600
+
+
+def _sign_payload(payload: Dict[str, Any]) -> str:
+    """HS256-sign an arbitrary claims dict with the app's JWT secret."""
+    header_b64 = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8"))
+    payload_b64 = _b64url_encode(json.dumps(payload).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    signature = hmac.new(
+        settings.jwt_secret.encode("utf-8"), signing_input, hashlib.sha256
+    ).digest()
+    return f"{header_b64}.{payload_b64}.{_b64url_encode(signature)}"
+
+
+def create_anon_token() -> Dict[str, Any]:
+    """Mint a fresh anonymous trial token.
+
+    Returns:
+        ``{"anon_token": str, "anon_id": str, "expires_in": int}``.
+    """
+    now = int(time.time())
+    anon_id = secrets.token_hex(16)
+    token = _sign_payload({
+        "typ": ANON_TOKEN_TYPE,
+        "aid": anon_id,
+        "iat": now,
+        _TOKEN_TTL: now + ANON_TOKEN_TTL_SECONDS,
+    })
+    return {"anon_token": token, "anon_id": anon_id, "expires_in": ANON_TOKEN_TTL_SECONDS}
+
+
+def verify_anon_token(token: Optional[str]) -> Optional[str]:
+    """Return the anonymous id inside a valid anon token, else None.
+
+    An ACCOUNT token is rejected even though its signature is valid: the
+    ``typ`` claim must be ``"anon"`` and an ``aid`` must be present.
+    """
+    if not token:
+        return None
+    payload = verify_access_token(token.strip())
+    if not payload or payload.get("typ") != ANON_TOKEN_TYPE:
+        return None
+    aid = payload.get("aid")
+    if not isinstance(aid, str) or not aid:
+        return None
+    return aid
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FastAPI dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -255,6 +316,13 @@ def get_current_user(request: Request) -> Dict[str, Any]:
 
     payload = verify_access_token(token)
     if not payload:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token. Log in again to get a fresh one.",
+        )
+    # An anonymous trial token is validly signed but belongs to nobody; it
+    # must never pass as an account session.
+    if payload.get("typ") == ANON_TOKEN_TYPE:
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired token. Log in again to get a fresh one.",

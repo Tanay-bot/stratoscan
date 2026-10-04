@@ -59,8 +59,21 @@ const SECTIONS = [
           </li>
           <li>
             <strong className="text-text-hi">What you saved</strong> — your watchlist, saved
-            screeners, and recent backtest runs, so they follow you to another device. This is the
-            only place the text of your queries is stored, because a saved screen is the query.
+            screeners, and recent backtest runs, so they follow you to another device.
+          </li>
+          <li>
+            <strong className="text-text-hi">Backtests you run</strong> — the strategy text and its
+            result, so a run survives a server restart and can be shared. They belong to your
+            account, or — if you try Stratoscan before signing up — to a random trial token in your
+            browser (<code className="text-text-hi">stratoscan_trial_token</code>). When you sign
+            up, those trial runs move into your new account.
+          </li>
+          <li>
+            <strong className="text-text-hi">Results you choose to share</strong> — nothing is
+            public until you press <em>Share result</em>. That publishes one page with the strategy
+            text and its headline numbers, which anyone with the link can open. It never shows your
+            email, your account or your trade list. <em>Stop sharing</em> deletes the page for
+            everyone.
           </li>
           <li>
             <strong className="text-text-hi">Anonymous usage events</strong> — that a landing page
@@ -84,7 +97,10 @@ const SECTIONS = [
           password. That single action:
         </p>
         <ul>
-          <li>deletes the account and everything saved to it (watchlist, screens, backtests);</li>
+          <li>
+            deletes the account and everything saved to it (watchlist, screens, backtests), and
+            every share link you published — those links stop working for everyone;
+          </li>
           <li>revokes every session, on every device, immediately;</li>
           <li>
             leaves your anonymous usage events in place but detaches them from you — the account
@@ -166,8 +182,9 @@ const SECTIONS = [
           </li>
         </ul>
         <p>
-          Your saved screens and backtests are private to your account and are never shared publicly
-          or with other users.
+          Your saved screens and backtests are private to your account. The only exception is a
+          result you choose to share: pressing Share publishes that one result until you stop
+          sharing it.
         </p>
       </>
     ),
