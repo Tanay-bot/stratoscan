@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
 import { ArrowRight, Search, Sparkles } from 'lucide-react'
 import { LandingNav } from '@/components/landing/LandingNav'
@@ -13,14 +13,19 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/store/auth'
 import { DEMO_MODE } from '@/lib/api/client'
 import { track } from '@/lib/analytics'
+import { templateById, type StrategyTemplate } from '@/lib/templates'
 import { useToasts } from '@/store/notifications'
 import { useRegisterSearchInput } from '@/hooks/useKeyboardShortcuts'
 
-const EXAMPLES = [
-  'find undervalued small-cap tech stocks',
-  'high-dividend energy companies',
-  'momentum breakout stocks',
-]
+// Hero chips are strategy templates (Day 8): each parses on the free path and
+// backtests sanely. A signed-out click lands in a FREE trial run, so a chip
+// that churned or matched nothing would spend one of three runs on a bad
+// first impression.
+const HERO_TEMPLATES = (
+  ['rsi-pullback-uptrend', 'oversold-mean-reversion', 'dividend-durability'] as const
+)
+  .map((id) => templateById(id))
+  .filter((t): t is StrategyTemplate => Boolean(t))
 
 const MARQUEE = [
   'natural language',
@@ -33,12 +38,19 @@ const MARQUEE = [
   'no spreadsheet required',
 ]
 
-const SEARCH_PROMPTS = [
-  'find undervalued small-cap tech stocks',
-  'high-dividend energy companies',
-  'momentum breakout stocks',
-  'oversold healthcare with low beta',
-]
+// The animated placeholder is also what "Screen" submits when nothing was
+// typed — and signed out, that is a free trial backtest. So it cycles through
+// template queries, which parse for free and backtest sanely.
+const SEARCH_PROMPTS = (
+  [
+    'oversold-mean-reversion',
+    'utility-income-dip',
+    'healthcare-oversold',
+    'mega-cap-defensive',
+  ] as const
+)
+  .map((id) => templateById(id)?.query)
+  .filter((q): q is string => Boolean(q))
 
 /**
  * Types, holds, deletes, then types the next prompt — a rotating search demo.
@@ -246,21 +258,23 @@ export function Landing() {
                 <span className="text-2xs font-medium uppercase tracking-wider text-text-low">
                   Try
                 </span>
-                {EXAMPLES.map((ex, i) => (
+                {HERO_TEMPLATES.map((t) => (
                   <button
-                    key={ex}
+                    key={t.id}
+                    title={t.query}
                     onClick={() => {
-                      // Identified by position, never by text: the query the
-                      // user sends is theirs, the chip is ours. Indexes here
-                      // are stable because the list is a module constant.
-                      track('template_used', { template: `landing-example-${i}` })
-                      runSearch(ex)
+                      // Identified by template id, never by text.
+                      track('template_used', { template: t.id })
+                      runSearch(t.query)
                     }}
                     className="glass-hover rounded-full px-3.5 py-1.5 text-xs text-text-mid"
                   >
-                    {ex}
+                    {t.title}
                   </button>
                 ))}
+                <Link to="/strategies" className="text-xs font-medium text-neon hover:underline">
+                  All templates →
+                </Link>
               </div>
             </motion.div>
 

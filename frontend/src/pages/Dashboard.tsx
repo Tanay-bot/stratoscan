@@ -7,6 +7,7 @@ import {
   Bookmark,
   Clock,
   LineChart,
+  Link2,
   Plus,
   Search,
   Star,
@@ -17,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
+import { SharedLinks } from '@/components/dashboard/SharedLinks'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { usePersonal } from '@/store/personal'
 import { listStocks, stockDetail } from '@/lib/api/services'
@@ -215,7 +217,12 @@ export function Dashboard() {
               <EmptyState
                 icon={Bookmark}
                 title="No saved screens yet"
-                description="Run a screen and save it to come back later."
+                description="Run a screen in plain English, then press Save to keep it here."
+                action={
+                  <Button variant="outline" size="sm" onClick={() => navigate('/app/screener')}>
+                    Open the screener
+                  </Button>
+                }
               />
             ) : (
               <ul className="space-y-2">
@@ -266,7 +273,12 @@ export function Dashboard() {
               <EmptyState
                 icon={Star}
                 title="Watchlist is empty"
-                description="Add stocks you're tracking from any screener result."
+                description="Add stocks you're tracking from any screener result — they show live prices here."
+                action={
+                  <Button variant="outline" size="sm" onClick={() => navigate('/app/screener')}>
+                    Find stocks to watch
+                  </Button>
+                }
               />
             ) : (
               <ul className="space-y-1.5">
@@ -334,8 +346,15 @@ export function Dashboard() {
             <EmptyState
               icon={LineChart}
               title="No backtests yet"
-              description="Backtest a strategy to see its equity curve here."
-              action={<Button onClick={() => navigate('/app/backtest')}>Run a backtest</Button>}
+              description="Not sure what to test? Start from one of twelve ready-made strategies — one click runs ten years of history against SPY."
+              action={
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button onClick={() => navigate('/strategies')}>Browse strategy templates</Button>
+                  <Button variant="outline" onClick={() => navigate('/app/backtest')}>
+                    Write my own
+                  </Button>
+                </div>
+              }
             />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -377,6 +396,19 @@ export function Dashboard() {
           )}
         </Widget>
       </motion.div>
+
+      {/* Day 6/8: what this account has made public, and the off switch. */}
+      {!DEMO_MODE && (
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.23 }}
+        >
+          <Widget title="Your share links" icon={Link2}>
+            <SharedLinks />
+          </Widget>
+        </motion.div>
+      )}
 
       {/* Quick CTA */}
       <motion.div

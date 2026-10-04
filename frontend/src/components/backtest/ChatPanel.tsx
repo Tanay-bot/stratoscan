@@ -4,6 +4,7 @@ import { Send, SlidersHorizontal, Sparkles, WandSparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useRateLimitCountdown } from '@/store/rateLimit'
+import { templateById } from '@/lib/templates'
 
 export interface ChatMessage {
   id: number
@@ -12,11 +13,12 @@ export interface ChatMessage {
   meta?: string[]
 }
 
-const SUGGESTIONS = [
-  'buy oversold tech stocks with rising momentum',
-  'high-dividend energy companies, SMA 50 above SMA 200',
-  'momentum breakout, RSI below 30, stop loss 8%',
-]
+// Strategy templates (Day 8), not free-form examples: each parses on the free
+// path and backtests sanely. The old chips mixed momentum entries that churn
+// with contradictory filters, and on /try every click spends a free run.
+const SUGGESTIONS = (['oversold-mean-reversion', 'utility-income-dip', 'tech-pullback'] as const)
+  .map((id) => templateById(id)?.query)
+  .filter((q): q is string => Boolean(q))
 
 export function ChatPanel({
   messages,

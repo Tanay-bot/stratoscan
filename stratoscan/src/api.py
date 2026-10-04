@@ -1438,6 +1438,19 @@ class PaginationMeta(BaseModel):
     fields: Dict[str, str] = {}     # offset|limit|total|has_more|next_offset
 
 
+class TemplateMeta(BaseModel):
+    """One strategy template (Day 8) — see ``src/strategy_templates.py``."""
+
+    id: str
+    title: str
+    query: str
+    idea: str
+    category: str
+    buy_rules: List[str]
+    sell_rules: List[str]
+    simulates: str
+
+
 class MetaResponse(BaseModel):
     """The capability manifest returned by GET /meta."""
 
@@ -1448,6 +1461,9 @@ class MetaResponse(BaseModel):
     sortable_columns: List[str]
     filter_fields: List[FilterFieldMeta]
     example_queries: List[str]
+    # Pre-filled strategies that parse on the free deterministic path and
+    # simulate exactly what their title says (tests/test_strategy_templates).
+    templates: List[TemplateMeta] = []
     rate_limits: Dict[str, Dict[str, int]]
     pagination: PaginationMeta
     auth: Dict[str, Any]
@@ -1610,6 +1626,7 @@ async def api_meta(request: Request, response: Response):
     frontend never hardcodes a route list that can drift.
     """
     from src.screener import SORTABLE_COLUMNS
+    from src.strategy_templates import templates_payload
 
     return MetaResponse(
         name=app.title,
@@ -1627,6 +1644,7 @@ async def api_meta(request: Request, response: Response):
         sortable_columns=sorted(SORTABLE_COLUMNS),
         filter_fields=FILTER_FIELDS_META,
         example_queries=EXAMPLE_QUERIES,
+        templates=[TemplateMeta(**t) for t in templates_payload()],
         rate_limits=RATE_LIMITS,
         pagination=PaginationMeta(
             default_limit=50,
@@ -4102,7 +4120,11 @@ async def list_my_shares(request: Request, response: Response):
                 "share_id": r["share_id"],
                 "url": _share_url(request, r["share_id"]),
                 "query": r.get("query"),
-                "created_at": str(r.get("created_at") or ""),
+                "created_at": (
+                    r["created_at"].isoformat()
+                    if hasattr(r.get("created_at"), "isoformat")
+                    else str(r.get("created_at") or "")
+                ),
                 "headline": (r.get("summary") or {}).get("headline"),
             }
             for r in rows

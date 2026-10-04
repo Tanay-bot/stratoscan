@@ -178,6 +178,7 @@ stratoscan/                          # Backend (Python)
 │   ├── admin_dashboard.py   # Self-contained HTML admin dashboard
 │   ├── share_page.py        # Day 6: public share summary (field whitelist) + server-rendered page
 │   ├── share_card.py        # Day 7: 1200×630 PNG preview card (Pillow + assets/fonts, cached by content hash)
+│   ├── strategy_templates.py # Day 8: the 12-template library (served in /meta; mirrored in frontend/src/lib/templates.ts)
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -644,6 +645,17 @@ copies `assets/`; without it every card 500s. Text goes through `clean_text` (st
 incl. bidi overrides, drops glyphs the font lacks) and BASIC layout (no libraqm dependence).
 Output is deterministic, so `api._SHARE_CARD_CACHE` keys it by `card_key(summary)` (bump
 `CARD_VERSION` when the layout changes); the DB lookup runs first, so a revoked link 404s.
+
+### `src/strategy_templates.py` — the template library (Day 8)
+
+`TEMPLATES` (12) with `id, title, query, idea, category, buy_rules, sell_rules`; `simulates(t)`
+renders the pinned rules as a sentence; `templates_payload()` feeds `GET /meta`. Three rules,
+enforced by `tests/test_strategy_templates.py`: each query parses deterministically (≥ 0.6, so
+**0 LLM calls**), the engine trades exactly the pinned rules (no screen-only ideas), and it does
+not churn (median hold ≥ 10 trading days on synthetic up/choppy/down markets). Technical
+screens must be restricted to large caps or a sector (technicals are refreshed for the top 500
+only). The frontend copy (`frontend/src/lib/templates.ts`) is checked id-for-id and
+query-for-query. Live check: `python verify_templates.py` (real prices + a full DB).
 
 ### `src/backfill.py` & `src/cache_warmer.py`
 
@@ -1151,6 +1163,12 @@ portable mirror and pinned in sync by `npm run verify:headers`.
   the `openapi.json` snapshot together.
 - **No raw exception text in responses** (security review finding) — log it, return generic.
 - **`JWT_SECRET` is required** even in hermetic tests (boot guard 503s) — CI sets a dummy.
+- **Momentum + the default RSI-70 exit churns** — buy `price > sma_50`, sell `rsi > 70`: in an
+  uptrend both hold at once, so it exits and re-enters on consecutive bars. Not changed (it is a
+  signal-generation decision, golden rule #6); templates avoid it and a test pins it.
+- **The Tune panel's RSI/SMA sliders don't reach the deterministic parser** — the clause the
+  Backtest page appends ("momentum: RSI buy below 30, RSI sell above 70, SMA cross 20/50") does
+  not change the parse. Day 9 (editable rules) is where that gets fixed.
 - **Scheduler cadence constants live in TWO places** — `scheduler.py` and
   `job_monitor.JOB_DEFINITIONS` — keep in sync when retuning.
 - **Docs disabled in production** — verify with `APP_ENV=production`.
@@ -1169,6 +1187,17 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 
 These shaped current behavior — don't "clean up" them without understanding why:
 
+- **Day 8 — templates + honest empty states:** 12 templates (`src/strategy_templates.py`), a
+  public `/strategies` page, template pickers in the Backtest empty and zero-match states,
+  landing chips that are templates (the old "momentum breakout stocks" chip sent trial users
+  into a churning backtest), a "Your share links" dashboard panel, and a Screener notice whenever
+  the zero-match rescue relaxes filters or a contradiction drops one. Parser: "above/below/near
+  **their** …" now sets the same trend flags as "its" (plural queries silently lost the
+  condition). **Open engine decision (golden rule #6):** a bullish-momentum entry
+  (`price > sma_50`) with the default `rsi > 70` exit churns (median hold 1 day on a synthetic
+  uptrend); golden cross / Bollinger / 52-week-high ideas are screened but traded on RSI 30/70.
+  Those templates are excluded until the founder decides; `test_strategy_templates` pins the
+  churn so a fix flips it.
 - **Day 6 — no signup wall + share links:** `/try/*` runs real backtests on a signed trial
   token (`auth.create_anon_token`, `typ:"anon"`; `get_current_user` refuses it, and
   `verify_anon_token` refuses account tokens). Trial jobs live in `backtest_jobs` with owner

@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StockRow } from '@/components/StockRow'
 import { EmptyState } from '@/components/EmptyState'
+import { AdjustmentNotice } from '@/components/screener/AdjustmentNotice'
 import { downloadBlob, exportScreenCsv, screen } from '@/lib/api/services'
 import { toApiError } from '@/lib/api/client'
 import { track } from '@/lib/analytics'
@@ -231,6 +232,7 @@ export function Screener() {
 
       {query && (
         <>
+          <AdjustmentNotice dataQuality={data?.data_quality} />
           {/* Results toolbar */}
           <div className="mb-4 flex flex-wrap items-center gap-3">
             <div className="min-w-0 flex-1">

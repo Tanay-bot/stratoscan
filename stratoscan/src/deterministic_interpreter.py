@@ -325,15 +325,17 @@ NUMERIC_PATTERNS = _build_numeric_patterns()
 
 # ── Derived / boolean criteria patterns ─────────────────────────────────────
 # Each tuple: (compiled_regex, derived_field, bool_value)
+# "its" OR "their": plural queries ("stocks above their 200-day") are the
+# common phrasing, and missing them silently dropped the trend condition.
 DERIVED_BOOLEAN_PATTERNS: List[Tuple[re.Pattern, str, bool]] = [
     (re.compile(r'golden\s*cross', re.IGNORECASE), 'golden_cross', True),
     (re.compile(r'death\s*cross', re.IGNORECASE), 'death_cross', True),
-    (re.compile(r'(?:above|over)\s*(?:its\s*)?(?:the\s*)?(?:50|fifty)[\s-]*day\s*(?:moving\s*)?average', re.IGNORECASE), 'above_sma_50', True),
-    (re.compile(r'(?:below|under)\s*(?:its\s*)?(?:the\s*)?(?:50|fifty)[\s-]*day\s*(?:moving\s*)?average', re.IGNORECASE), 'below_sma_50', True),
-    (re.compile(r'(?:above|over)\s*(?:its\s*)?(?:the\s*)?(?:200|two[\s-]*hundred)[\s-]*day', re.IGNORECASE), 'above_sma_200', True),
-    (re.compile(r'(?:below|under)\s*(?:its\s*)?(?:the\s*)?(?:200|two[\s-]*hundred)[\s-]*day', re.IGNORECASE), 'below_sma_200', True),
-    (re.compile(r'(?:near|close\s*to|approaching|at)\s*(?:its\s*)?(?:the\s*)?52[\s-]*week\s*high', re.IGNORECASE), 'near_52w_high', True),
-    (re.compile(r'(?:near|close\s*to|approaching|at)\s*(?:its\s*)?(?:the\s*)?52[\s-]*week\s*low', re.IGNORECASE), 'near_52w_low', True),
+    (re.compile(r'(?:above|over)\s*(?:(?:its|their)\s*)?(?:the\s*)?(?:50|fifty)[\s-]*day\s*(?:moving\s*)?average', re.IGNORECASE), 'above_sma_50', True),
+    (re.compile(r'(?:below|under)\s*(?:(?:its|their)\s*)?(?:the\s*)?(?:50|fifty)[\s-]*day\s*(?:moving\s*)?average', re.IGNORECASE), 'below_sma_50', True),
+    (re.compile(r'(?:above|over)\s*(?:(?:its|their)\s*)?(?:the\s*)?(?:200|two[\s-]*hundred)[\s-]*day', re.IGNORECASE), 'above_sma_200', True),
+    (re.compile(r'(?:below|under)\s*(?:(?:its|their)\s*)?(?:the\s*)?(?:200|two[\s-]*hundred)[\s-]*day', re.IGNORECASE), 'below_sma_200', True),
+    (re.compile(r'(?:near|close\s*to|approaching|at)\s*(?:(?:its|their)\s*)?(?:the\s*)?52[\s-]*week\s*high', re.IGNORECASE), 'near_52w_high', True),
+    (re.compile(r'(?:near|close\s*to|approaching|at)\s*(?:(?:its|their)\s*)?(?:the\s*)?52[\s-]*week\s*low', re.IGNORECASE), 'near_52w_low', True),
     (re.compile(r'52[\s-]*week\s*highs?', re.IGNORECASE), 'near_52w_high', True),
     (re.compile(r'52[\s-]*week\s*lows?', re.IGNORECASE), 'near_52w_low', True),
     (re.compile(r'strong\s*uptrend', re.IGNORECASE), 'golden_cross', True),

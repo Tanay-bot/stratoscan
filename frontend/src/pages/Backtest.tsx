@@ -43,6 +43,8 @@ import { ChatPanel, type ChatMessage } from '@/components/backtest/ChatPanel'
 import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
 import { TrialBanner } from '@/components/backtest/TrialBanner'
+import { TemplatePicker } from '@/components/templates/TemplatePicker'
+import type { StrategyTemplate } from '@/lib/templates'
 import {
   backtest,
   backtestAsync,
@@ -284,6 +286,13 @@ export function Backtest() {
     } finally {
       if (id === runId.current) setLoading(false)
     }
+  }
+
+  /** Day 8: one click from an empty box to a real result. */
+  const runTemplate = (t: StrategyTemplate) => {
+    // The template id only — never its text (the analytics whitelist).
+    track('template_used', { template: t.id })
+    void run(t.query)
   }
 
   useEffect(() => {
@@ -656,6 +665,7 @@ export function Backtest() {
             title="Backtest a strategy for free"
             description="Describe a strategy in the chat — e.g. “buy oversold tech stocks” — and I'll generate the scan code, run 10 years of simulated trading, and show you the verdict."
             className="w-full"
+            action={<TemplatePicker onPick={runTemplate} disabled={pending} />}
           />
         </div>
       )}
@@ -747,6 +757,13 @@ export function Backtest() {
             'Your strategy screened to 0 candidates — nothing was simulated. Try a broader query or looser filters (e.g. drop the momentum condition).'
           }
           className="w-full"
+          action={
+            <TemplatePicker
+              onPick={runTemplate}
+              disabled={pending}
+              heading="Or run a ready-made strategy instead"
+            />
+          }
         />
       )}{' '}
       {result && result.total_symbols_tested > 0 && (

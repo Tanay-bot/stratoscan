@@ -3225,6 +3225,14 @@
             "type": "array",
             "title": "Example Queries"
           },
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateMeta"
+            },
+            "type": "array",
+            "title": "Templates",
+            "default": []
+          },
           "rate_limits": {
             "additionalProperties": {
               "additionalProperties": {
@@ -4214,6 +4222,61 @@
         ],
         "title": "StockResult",
         "description": "A single stock result from the screener."
+      },
+      "TemplateMeta": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "idea": {
+            "type": "string",
+            "title": "Idea"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "buy_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Buy Rules"
+          },
+          "sell_rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sell Rules"
+          },
+          "simulates": {
+            "type": "string",
+            "title": "Simulates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "query",
+          "idea",
+          "category",
+          "buy_rules",
+          "sell_rules",
+          "simulates"
+        ],
+        "title": "TemplateMeta",
+        "description": "One strategy template (Day 8) \u2014 see ``src/strategy_templates.py``."
       },
       "TradeInfo": {
         "properties": {

@@ -3,6 +3,21 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 8 — Nobody faces an empty box
+
+**Shipped:** twelve strategy templates that each parse for free, trade exactly what their
+title says, and hold for weeks — enforced by a suite that also pins every rule they produce;
+a public `/strategies` page; one-click templates in every empty box (Backtest empty and
+zero-match states, the landing hero); a share-links panel with an off switch; and a Screener
+notice whenever filters are relaxed or dropped. Landing → template → result is two clicks.
+
+**Broke / found:** "stocks above *their* 200-day average" silently lost the trend condition —
+the parser only knew "its". A momentum entry with the default RSI-70 exit buys and sells on
+consecutive bars in an uptrend (median hold: 1 day); golden cross and Bollinger are screened
+but traded on RSI. Left for the founder (backtest math is frozen); those templates wait. The
+landing chip "momentum breakout stocks" was walking trial users straight into that churn. The
+Tune panel's RSI/SMA sliders never reached the deterministic parser.
+
 ## Day 7 — Make a shared link worth clicking
 
 **Shipped:** every share link now unfurls into a 1200×630 card — the query, the return, where

@@ -162,6 +162,14 @@ Use at boot to confirm the API is reachable and link to docs/meta.
 - Use `example_queries` for "try one of these" presets.
 - Use `rate_limits` to surface remaining budget to the user.
 
+
+`templates[]` (Day 8) is the strategy template library — `{id, title, query,
+idea, category, buy_rules, sell_rules, simulates}`. Every query parses on the
+free deterministic path, `buy_rules`/`sell_rules` are exactly what the engine
+trades, and `simulates` says so in a sentence: show it next to the title so a
+template never promises more than the backtest tests. Run one by sending its
+`query` to `/try/backtest` or `/backtest/async`.
+
 ### `GET /meta/sectors` and `GET /meta/industries` — dropdown reference data
 ```json
 { "total": 11, "values": [{"name": "Technology", "count": 1902}, {"name": "Finance", "count": 1693}] }

@@ -99,6 +99,13 @@ export const PUBLIC: RouteMeta[] = [
     noindex: false,
   },
   {
+    path: '/strategies',
+    title: 'Stock Strategy Templates, Backtested Free — Stratoscan',
+    description:
+      'Twelve ready-made stock strategies — pullbacks, mean reversion, value, quality, dividends — each one click from a free 10-year backtest against SPY.',
+    noindex: false,
+  },
+  {
     path: '/login',
     title: 'Log In — Stratoscan',
     description:
