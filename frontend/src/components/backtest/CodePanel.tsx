@@ -7,12 +7,11 @@ export interface CodeParams {
   capital: number
   startDate: string
   endDate: string
-  rsiBuy: number
-  rsiSell: number
-  smaFast: number
-  smaSlow: number
-  stopLoss: number
-  takeProfit: number
+  /** Overrides; null = the strategy's own rules (shown as such). */
+  rsiBuy: number | null
+  rsiSell: number | null
+  stopLoss: number | null
+  takeProfit: number | null
   allowShort: boolean
   topN: number
 }
@@ -21,12 +20,10 @@ const DEFAULT_PARAMS: CodeParams = {
   capital: 100000,
   startDate: '',
   endDate: '',
-  rsiBuy: 30,
-  rsiSell: 70,
-  smaFast: 20,
-  smaSlow: 50,
-  stopLoss: 8,
-  takeProfit: 20,
+  rsiBuy: null,
+  rsiSell: null,
+  stopLoss: null,
+  takeProfit: null,
   allowShort: false,
   topN: 5,
 }
@@ -53,17 +50,20 @@ function buildScript(query: string, p: CodeParams): string[] {
     'screen = Screen("US_EQUITIES_10Y")',
     `screen.thesis("${q}")`,
     '',
-    '# entry signals',
-    `screen.add(Signal.RSI(below=${p.rsiBuy}))`,
-    `screen.add(Signal.RSI(above=${p.rsiSell}))`,
-    `screen.add(Signal.SMA(cross=${p.smaFast}/${p.smaSlow}))`,
+    '# signals: from the strategy text unless overridden in Tune',
+    p.rsiBuy === null
+      ? '# entry: as interpreted from the thesis'
+      : `screen.entry(Signal.RSI(below=${p.rsiBuy}))`,
+    p.rsiSell === null
+      ? '# exit: as interpreted from the thesis'
+      : `screen.exit(Signal.RSI(above=${p.rsiSell}))`,
     '',
     'engine = Backtest(',
     `    capital=${p.capital},`,
     `    start="${start}",`,
     `    end="${end}",`,
-    `    stop_loss=${p.stopLoss},`,
-    `    take_profit=${p.takeProfit},`,
+    `    stop_loss=${p.stopLoss ?? 'None'},`,
+    `    take_profit=${p.takeProfit ?? 'None'},`,
     `    allow_short=${String(p.allowShort).toLowerCase()},`,
     ')',
     '',

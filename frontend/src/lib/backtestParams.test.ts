@@ -61,8 +61,12 @@ describe('parseParams', () => {
   it('returns defaults for an empty URLSearchParams', () => {
     const p = parseParams(new URLSearchParams())
     expect(p.topN).toBe(5)
-    expect(p.stopLoss).toBe(8)
-    expect(p.takeProfit).toBe(20)
+    // Day 9: no stop or target unless one was set — an absent override stays
+    // absent (it used to default to an 8% stop and 20% target, silently).
+    expect(p.stopLoss).toBeNull()
+    expect(p.takeProfit).toBeNull()
+    expect(p.rsiBuy).toBeNull()
+    expect(p.rsiSell).toBeNull()
     expect(p.allowShort).toBe(false)
     expect(p.startDate).toBe('')
     expect(p.endDate).toBe('')
@@ -95,7 +99,7 @@ describe('parseParams', () => {
     const sp = new URLSearchParams('top_n=abc&stop_loss=xyz')
     const p = parseParams(sp)
     expect(p.topN).toBe(5) // default
-    expect(p.stopLoss).toBe(8) // default
+    expect(p.stopLoss).toBeNull() // unset, not a made-up default
   })
 
   it('treats missing allocation/rebalance as defaults', () => {
@@ -113,8 +117,15 @@ describe('serializeParams ↔ parseParams round-trip', () => {
     const sp = new URLSearchParams(s)
     const p = parseParams(sp)
     expect(p.topN).toBe(5)
-    expect(p.stopLoss).toBe(8) // default
+    expect(p.stopLoss).toBeNull()
     expect(p.allowShort).toBe(false) // default
+  })
+
+  it('round-trips the Tune RSI overrides', () => {
+    const req: BacktestRequest = { query: 'AAPL', rsi_buy_below: 35, rsi_sell_above: 65 }
+    const p = parseParams(new URLSearchParams(serializeParams(req)))
+    expect(p.rsiBuy).toBe(35)
+    expect(p.rsiSell).toBe(65)
   })
 
   it('round-trips a fully-specified request', () => {

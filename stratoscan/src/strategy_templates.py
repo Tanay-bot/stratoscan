@@ -16,13 +16,14 @@ Every template here is held to three rules, enforced by
 3. **It does not churn.** On synthetic up, choppy and down markets, its
    median holding period is measured in weeks, not a day.
 
-Left out on purpose, pending an engine decision (see BUILD_LOG Day 8):
-golden cross, Bollinger and 52-week-high momentum, and every "bullish
-momentum" idea. The first three are screened but then traded on the default
-RSI 30/70 timing; momentum entries (``price > sma_50``) paired with the
-default ``rsi > 70`` exit re-enter and exit on consecutive bars in a strong
-trend (median hold: 1 day on a synthetic uptrend). Volume-confirmed
-breakouts wait for the Day 14 volume fix.
+Momentum templates trade the Day 9 momentum rules: enter when price is above
+its 50-day average inside an uptrend (50-day above the 200-day), exit when
+price falls below the 200-day. (Before Day 9 the exit was "RSI above 70",
+which re-entered and exited on consecutive bars in a trend.)
+
+Still left out: golden cross and Bollinger ideas — they are screened, but
+the engine then trades RSI timing, so the title would promise more than the
+simulation tests. Volume-confirmed breakouts wait for the Day 14 volume fix.
 
 The frontend mirrors this list in ``frontend/src/lib/templates.ts`` (the
 template test fails if the two drift apart).
@@ -52,6 +53,8 @@ def _rsi(n: float) -> Tuple[str, ...]:
 
 
 _EXIT = ("rsi > 70",)
+_TREND_ENTRY = ("price > sma_50", "sma_50 > sma_200")
+_TREND_EXIT = ("price < sma_200",)
 
 TEMPLATES: Tuple[StrategyTemplate, ...] = (
     StrategyTemplate(
@@ -69,6 +72,30 @@ TEMPLATES: Tuple[StrategyTemplate, ...] = (
         idea="Deeply oversold large caps tend to bounce.",
         category="Mean reversion",
         buy_rules=_rsi(30.0), sell_rules=_EXIT,
+    ),
+    StrategyTemplate(
+        id="52-week-high-momentum",
+        title="52-week high momentum",
+        query="large cap stocks near their 52-week high with bullish momentum",
+        idea="Stocks near their highs keep climbing while the trend holds.",
+        category="Momentum",
+        buy_rules=_TREND_ENTRY, sell_rules=_TREND_EXIT,
+    ),
+    StrategyTemplate(
+        id="large-cap-momentum",
+        title="Large-cap momentum",
+        query="large cap stocks with bullish momentum",
+        idea="Riding big names in an uptrend beats buying their dips.",
+        category="Momentum",
+        buy_rules=_TREND_ENTRY, sell_rules=_TREND_EXIT,
+    ),
+    StrategyTemplate(
+        id="tech-momentum",
+        title="Tech momentum",
+        query="technology stocks with bullish momentum",
+        idea="The strongest sector's trend carries on until it breaks.",
+        category="Momentum",
+        buy_rules=_TREND_ENTRY, sell_rules=_TREND_EXIT,
     ),
     StrategyTemplate(
         id="low-volatility-value",
@@ -157,7 +184,11 @@ def _fmt_rule(rule: str) -> str:
     field, op, value = rule.split()
     names = {"rsi": "RSI(14)", "price": "price", "sma_50": "the 50-day average",
              "sma_200": "the 200-day average"}
-    words = {"<": "drops below", ">": "rises above"}
+    # RSI crosses thresholds; prices and averages sit above or below each other.
+    words = (
+        {"<": "drops below", ">": "rises above"} if field == "rsi"
+        else {"<": "falls below", ">": "is above"}
+    )
     try:
         v = float(value)
         shown = f"{v:g}"

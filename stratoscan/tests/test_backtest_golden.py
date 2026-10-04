@@ -19,6 +19,8 @@ Scenarios:
      Trades the noise; negative return, huge negative Sharpe, t-stat < 2.
   C. ``mean_revert`` — flat market, tight mean-reversion with a contradiction
      guard (rsi < 35 AND price > sma_50); losing edge, all windows negative.
+  D. ``momentum`` — the rules "bullish momentum" TRANSLATES to (Day 9), on a
+     wavy uptrend: pins signal generation, not just the engine.
 
 Frozen fields: headline metrics (return / final value / Sharpe / drawdown /
 win rate / trades), Monte Carlo percentiles + prob_positive, bootstrap CI
@@ -198,6 +200,34 @@ if mc and mc["available"]:
 wf = C["wf"]
 if wf and wf.get("available"):
     check("verdict 'All windows negative'", wf["rolling"]["verdict"] == "All windows negative", f"got {wf['rolling']['verdict']}")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Scenario D — the TRANSLATED momentum strategy (Day 9, approved change)
+# ═══════════════════════════════════════════════════════════════════════════
+# Pins signal generation end to end: "bullish momentum" → the exact rules →
+# the exact numbers. The pre-Day-9 rules (buy price > sma_50, sell rsi > 70)
+# exited and re-entered on consecutive bars in a trend; this pair cannot.
+print("\nScenario D: momentum — translated rules on a wavy uptrend")
+from src.backtester import _translate_to_rules  # noqa: E402
+from src.interpreter import InterpretedQuery  # noqa: E402
+
+mom_rules = _translate_to_rules(
+    InterpretedQuery(raw_input="stocks with bullish momentum", filters=[], momentum="bullish")
+)
+check("momentum entry = price > sma_50 AND sma_50 > sma_200",
+      mom_rules["buy_rules"] == ["price > sma_50", "sma_50 > sma_200"], f"got {mom_rules['buy_rules']}")
+check("momentum exit = price < sma_200", mom_rules["sell_rules"] == ["price < sma_200"],
+      f"got {mom_rules['sell_rules']}")
+df_d = frame(n=700, drift=0.05, wave=6.0)
+r = run_backtest(symbol="MOMENTUM", strategy_rules=mom_rules, start_date=str(df_d.index[0])[:10],
+                 end_date=str(df_d.index[-1])[:10], df=df_d, compute_robustness=False)
+check("total_return ≈ +0.043324", close(r.total_return, 0.043324), f"got {r.total_return}")
+check("final_value ≈ $104,332.36", close(r.final_value, 104332.362249), f"got {r.final_value}")
+check("sharpe ≈ 0.451346", close(r.sharpe_ratio or 0, 0.451346), f"got {r.sharpe_ratio}")
+check("max_drawdown ≈ -0.095975", close(r.max_drawdown, -0.095975), f"got {r.max_drawdown}")
+check("7 trades", r.total_trades == 7, f"got {r.total_trades}")
+holds = [int(np.busday_count(t.buy_date, t.sell_date)) for t in r.trades if t.sell_date]
+check("every hold ≥ 20 trading days (no churn)", bool(holds) and min(holds) >= 20, f"got {holds}")
 
 print()
 print(f"🎯 Golden-set: {PASS} passed, {FAIL} failed")

@@ -218,6 +218,12 @@ Response per symbol includes `total_return_pct`, `sharpe_ratio`,
 `confidence_intervals`, `walk_forward`, `parameter_sensitivity`, `warnings`,
 `data_quality[]`.
 
+**Signal overrides (Day 9).** `rsi_buy_below` (0–100, exclusive) replaces the strategy's RSI
+entry threshold, or adds an RSI condition to an entry that had none; `rsi_sell_above` replaces
+the exit with "RSI above N". `rsi_buy_below >= rsi_sell_above` is a 422. Omit them to run the
+rules the query produced. Never append thresholds to `query` as text — the parser ignores
+them. The rules that actually ran are echoed in `strategy.buy_rules` / `strategy.sell_rules`.
+
 ### `POST /backtest/async` and `GET /backtest/async/{job_id}` — long backtests (bearer)
 
 `POST /backtest/async` takes the same body as `/backtest` and returns

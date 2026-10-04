@@ -2266,6 +2266,34 @@
             "description": "Number of top stocks to backtest (1-50, default 5). The engine ranks the whole universe against the strategy and backtests the top matches; larger values take longer.",
             "default": 5
           },
+          "rsi_buy_below": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMaximum": 100.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi Buy Below",
+            "description": "Entry: also require RSI(14) below this (replaces the strategy's RSI entry threshold)"
+          },
+          "rsi_sell_above": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMaximum": 100.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi Sell Above",
+            "description": "Exit: sell when RSI(14) rises above this (replaces the strategy's exit)"
+          },
           "stop_loss_pct": {
             "anyOf": [
               {

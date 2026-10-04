@@ -191,7 +191,19 @@ assert "price > sma_50" in r["buy_rules"], f"bullish momentum should buy above S
 assert not any(rule.startswith("rsi > 50") for rule in r["sell_rules"]), (
     f"min_rsi=50 must not become a sell rule: {r}"
 )
-assert "rsi > 70" in r["sell_rules"]  # default overbought sell intact
+# Day 9 (approved signal change): momentum = price above the 50-day INSIDE
+# an uptrend, held until the trend breaks. Entry and exit are mutually
+# exclusive, so the rules can never open and close on consecutive bars —
+# the old "rsi > 70" exit did exactly that in a strong trend.
+assert r["buy_rules"] == ["price > sma_50", "sma_50 > sma_200"], r["buy_rules"]
+assert r["sell_rules"] == ["price < sma_200"], r["sell_rules"]
+# ...but a dip-buying entry with momentum keeps the overbought exit.
+r = _rules_for(
+    "oversold stocks with rising momentum",
+    [FilterCriterion("rsi_14", ComparisonOp.LTE, 35)],
+    momentum="bullish",
+)
+assert r["sell_rules"] == ["rsi > 70"], r
 
 # Undervalued (pe lte): the backtest frame has NO per-bar P/E column, so a
 # `pe < 15` rule would silently compare PRICE to 15 (_apply_rule maps

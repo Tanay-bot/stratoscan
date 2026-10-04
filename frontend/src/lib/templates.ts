@@ -39,6 +39,33 @@ export const TEMPLATES: readonly StrategyTemplate[] = [
     simulates: 'Buys when RSI(14) drops below 30; sells when RSI(14) rises above 70.',
   },
   {
+    id: '52-week-high-momentum',
+    title: '52-week high momentum',
+    query: 'large cap stocks near their 52-week high with bullish momentum',
+    idea: 'Stocks near their highs keep climbing while the trend holds.',
+    category: 'Momentum',
+    simulates:
+      'Buys when price is above the 50-day average and the 50-day average is above the 200-day average; sells when price falls below the 200-day average.',
+  },
+  {
+    id: 'large-cap-momentum',
+    title: 'Large-cap momentum',
+    query: 'large cap stocks with bullish momentum',
+    idea: 'Riding big names in an uptrend beats buying their dips.',
+    category: 'Momentum',
+    simulates:
+      'Buys when price is above the 50-day average and the 50-day average is above the 200-day average; sells when price falls below the 200-day average.',
+  },
+  {
+    id: 'tech-momentum',
+    title: 'Tech momentum',
+    query: 'technology stocks with bullish momentum',
+    idea: "The strongest sector's trend carries on until it breaks.",
+    category: 'Momentum',
+    simulates:
+      'Buys when price is above the 50-day average and the 50-day average is above the 200-day average; sells when price falls below the 200-day average.',
+  },
+  {
     id: 'low-volatility-value',
     title: 'Low-volatility value',
     query: 'large cap low beta value stocks with P/E below 15 and RSI below 35',

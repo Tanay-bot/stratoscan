@@ -178,7 +178,7 @@ stratoscan/                          # Backend (Python)
 │   ├── admin_dashboard.py   # Self-contained HTML admin dashboard
 │   ├── share_page.py        # Day 6: public share summary (field whitelist) + server-rendered page
 │   ├── share_card.py        # Day 7: 1200×630 PNG preview card (Pillow + assets/fonts, cached by content hash)
-│   ├── strategy_templates.py # Day 8: the 12-template library (served in /meta; mirrored in frontend/src/lib/templates.ts)
+│   ├── strategy_templates.py # Day 8: the 15-template library (served in /meta; mirrored in frontend/src/lib/templates.ts)
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -434,7 +434,9 @@ marks orphaned async backtest jobs as `interrupted`.
   `rsi > X` (a `min_rsi=50` momentum filter must NOT become an immediate sell rule); **P/E is
   deliberately NOT translated** (no per-bar P/E column — the screener already selected the
   names; emitting a `pe` rule would silently compare price to P/E via a `Close` fallback);
-  momentum emitted once after the loop; defaults `rsi < 30` buy / `rsi > 70` sell; risk params
+  momentum emitted once after the loop as `price > sma_50` AND `sma_50 > sma_200`, with a
+  default exit of `price < sma_200` (Day 9 — exclusive of the entry, so it cannot churn; a
+  dip-buying RSI entry keeps `rsi > 70`); defaults `rsi < 30` buy / `rsi > 70` sell; risk params
   (stop-loss/take-profit/trailing/position size/leverage/short) extracted from plain English
   via regex (`_extract_pct`).
 - `fetch_historical_data(symbol, start_date=None)` — yfinance download, normalized, **starts
@@ -1163,12 +1165,14 @@ portable mirror and pinned in sync by `npm run verify:headers`.
   the `openapi.json` snapshot together.
 - **No raw exception text in responses** (security review finding) — log it, return generic.
 - **`JWT_SECRET` is required** even in hermetic tests (boot guard 503s) — CI sets a dummy.
-- **Momentum + the default RSI-70 exit churns** — buy `price > sma_50`, sell `rsi > 70`: in an
-  uptrend both hold at once, so it exits and re-enters on consecutive bars. Not changed (it is a
-  signal-generation decision, golden rule #6); templates avoid it and a test pins it.
-- **The Tune panel's RSI/SMA sliders don't reach the deterministic parser** — the clause the
-  Backtest page appends ("momentum: RSI buy below 30, RSI sell above 70, SMA cross 20/50") does
-  not change the parse. Day 9 (editable rules) is where that gets fixed.
+- **Entry and exit rules must be mutually exclusive** — buy and sell rules are each ANDed and
+  evaluated on every bar; if the exit can be true while the entry is, the sim buys and sells on
+  consecutive bars. That was momentum until Day 9 (`price > sma_50` / `rsi > 70`: median hold 1
+  day). Golden scenario D and `test_strategy_templates` pin the fix.
+- **Tune overrides are request fields, never query text** — `rsi_buy_below` / `rsi_sell_above`
+  (plus stop/target) are applied in `_run_backtest_pipeline` and echoed in `strategy`; the
+  frontend sends only what the user set. Don't reintroduce text appended to `query` — the
+  parser ignores it and it shows up on share pages.
 - **Scheduler cadence constants live in TWO places** — `scheduler.py` and
   `job_monitor.JOB_DEFINITIONS` — keep in sync when retuning.
 - **Docs disabled in production** — verify with `APP_ENV=production`.
@@ -1193,11 +1197,16 @@ These shaped current behavior — don't "clean up" them without understanding wh
   into a churning backtest), a "Your share links" dashboard panel, and a Screener notice whenever
   the zero-match rescue relaxes filters or a contradiction drops one. Parser: "above/below/near
   **their** …" now sets the same trend flags as "its" (plural queries silently lost the
-  condition). **Open engine decision (golden rule #6):** a bullish-momentum entry
-  (`price > sma_50`) with the default `rsi > 70` exit churns (median hold 1 day on a synthetic
-  uptrend); golden cross / Bollinger / 52-week-high ideas are screened but traded on RSI 30/70.
-  Those templates are excluded until the founder decides; `test_strategy_templates` pins the
-  churn so a fix flips it.
+  condition). Golden cross / Bollinger ideas are screened but traded on RSI timing, so they are
+  not templates.
+- **Day 9 (part) — momentum stops churning; Tune is real:** approved signal change — bullish
+  momentum now enters on `price > sma_50 AND sma_50 > sma_200` and exits on `price < sma_200`
+  (median holds 18–128 days across 6 seeds × 4 synthetic regimes, vs 1 day before). Pinned by
+  golden scenario D; three momentum templates are back (15 total). The Tune panel's RSI fields
+  are now `rsi_buy_below` / `rsi_sell_above` request fields; the Backtest page no longer appends
+  "momentum: RSI buy below …" to the query, no longer applies a silent 8% stop / 20% target,
+  and drops the SMA fast/slow and capital inputs the engine never read. A shared link's Tune
+  settings now apply to the run it triggers (they were hydrated one render too late).
 - **Day 6 — no signup wall + share links:** `/try/*` runs real backtests on a signed trial
   token (`auth.create_anon_token`, `typ:"anon"`; `get_current_user` refuses it, and
   `verify_anon_token` refuses account tokens). Trial jobs live in `backtest_jobs` with owner

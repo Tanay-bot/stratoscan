@@ -284,8 +284,24 @@ def _translate_to_rules(interpreted: InterpretedQuery) -> Dict[str, Any]:
     # rising momentum' → buy=['price > sma_50', 'rsi < 35', 'price >
     # sma_50']). Redundant rules don't change AND-logic, but they bloat the
     # auditable strategy echo and look like a bug to users.
-    if interpreted.momentum == "bullish":
-        rules["buy"].append("price > sma_50")
+    #
+    # Bullish momentum = price above its 50-day average INSIDE an uptrend
+    # (50-day above the 200-day), held until the trend breaks (price below
+    # the 200-day). The entry and the default exit are mutually exclusive
+    # (entry implies price > sma_50 > sma_200), so a position can never be
+    # opened and closed on consecutive bars by the rules themselves.
+    #
+    # Before Day 9 the entry was "price > sma_50" with the generic "rsi > 70"
+    # exit. In a strong uptrend both are true at once: buy at the open, sell
+    # at the next open, buy again — median hold 1 day on synthetic uptrends,
+    # paying fees every round trip. Measured alternatives (6 seeds x 4
+    # regimes): "price < sma_50" still whipsawed (median 3–5 days); exits
+    # that are not exclusive of the entry ("price < sma_200" with a bare
+    # "price > sma_50" entry, or the death cross) churned harder; this pair
+    # held 18–128 days with 9–19 trades. Approved as a signal change.
+    momentum_entry = interpreted.momentum == "bullish"
+    if momentum_entry:
+        rules["buy"].extend(["price > sma_50", "sma_50 > sma_200"])
     elif interpreted.momentum == "bearish":
         rules["sell"].append("price < sma_50")
 
@@ -293,7 +309,14 @@ def _translate_to_rules(interpreted: InterpretedQuery) -> Dict[str, Any]:
     if not rules["buy"]:
         rules["buy"] = ["rsi < 30"]  # Classic oversold buy
     if not rules["sell"]:
-        rules["sell"] = ["rsi > 70"]  # Classic overbought sell
+        # A dip-buying entry (an RSI rule) exits on overbought; a pure trend
+        # entry exits when the trend breaks — never on "overbought", which a
+        # strong trend is most of the time.
+        has_rsi_entry = any(r.startswith("rsi <") for r in rules["buy"])
+        rules["sell"] = (
+            ["price < sma_200"] if momentum_entry and not has_rsi_entry
+            else ["rsi > 70"]  # Classic overbought sell
+        )
 
     raw = raw_lower
 

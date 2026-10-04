@@ -79,6 +79,10 @@ export interface ScreenResponse {
 export interface BacktestRequest {
   query: string
   top_n?: number
+  /** Day 9: replaces the strategy's RSI entry threshold (or adds one). */
+  rsi_buy_below?: number | null
+  /** Day 9: replaces the strategy's exit with "RSI above N". */
+  rsi_sell_above?: number | null
   stop_loss_pct?: number | null
   take_profit_pct?: number | null
   trailing_stop_pct?: number | null

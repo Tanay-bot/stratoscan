@@ -15,6 +15,8 @@ export function serializeParams(req: BacktestRequest): string {
   put('top_n', req.top_n)
   put('stop_loss', req.stop_loss_pct)
   put('take_profit', req.take_profit_pct)
+  put('rsi_buy', req.rsi_buy_below)
+  put('rsi_sell', req.rsi_sell_above)
   put('allow_short', req.allow_short)
   put('start', req.start_date)
   put('end', req.end_date)
@@ -37,10 +39,18 @@ export function parseParams(sp: URLSearchParams) {
     const v = Number(sp.get(k))
     return Number.isFinite(v) && sp.get(k) !== null ? v : d
   }
+  /** An override that is absent stays absent (null = "from the strategy"). */
+  const opt = (k: string): number | null => {
+    const raw = sp.get(k)
+    const v = Number(raw)
+    return raw !== null && raw !== '' && Number.isFinite(v) ? v : null
+  }
   return {
     topN: n('top_n', 5),
-    stopLoss: n('stop_loss', 8),
-    takeProfit: n('take_profit', 20),
+    stopLoss: opt('stop_loss'),
+    takeProfit: opt('take_profit'),
+    rsiBuy: opt('rsi_buy'),
+    rsiSell: opt('rsi_sell'),
     allowShort: sp.get('allow_short') === 'true',
     startDate: sp.get('start') ?? '',
     endDate: sp.get('end') ?? '',

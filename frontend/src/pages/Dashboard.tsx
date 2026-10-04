@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
 import { SharedLinks } from '@/components/dashboard/SharedLinks'
+import { TEMPLATES } from '@/lib/templates'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { usePersonal } from '@/store/personal'
 import { listStocks, stockDetail } from '@/lib/api/services'
@@ -346,7 +347,7 @@ export function Dashboard() {
             <EmptyState
               icon={LineChart}
               title="No backtests yet"
-              description="Not sure what to test? Start from one of twelve ready-made strategies — one click runs ten years of history against SPY."
+              description={`Not sure what to test? Start from one of ${TEMPLATES.length} ready-made strategies — one click runs ten years of history against SPY.`}
               action={
                 <div className="flex flex-wrap justify-center gap-2">
                   <Button onClick={() => navigate('/strategies')}>Browse strategy templates</Button>

@@ -556,6 +556,19 @@ class BacktestRequest(BaseModel):
     # Tier 2 realism overrides — optional, explicit wins over whatever the
     # LLM inferred. Percentages arrive 0-100 and become decimal fractions
     # inside the engine. All default None = "not specified".
+    # Day 9: explicit signal thresholds from the Tune panel. None = keep the
+    # rules the strategy text produced. rsi_buy_below replaces the entry's
+    # RSI threshold (or adds an RSI condition to an entry that had none);
+    # rsi_sell_above replaces the exit with "RSI above N". The applied rules
+    # are echoed in the response's `strategy`.
+    rsi_buy_below: Optional[float] = Field(
+        default=None, gt=0, lt=100,
+        description="Entry: also require RSI(14) below this (replaces the strategy's RSI entry threshold)",
+    )
+    rsi_sell_above: Optional[float] = Field(
+        default=None, gt=0, lt=100,
+        description="Exit: sell when RSI(14) rises above this (replaces the strategy's exit)",
+    )
     stop_loss_pct: Optional[float] = Field(
         None,
         ge=0,
@@ -3147,6 +3160,22 @@ def _run_backtest_pipeline(
             detail="rebalance_frequency must be one of: none, monthly, quarterly, yearly",
         )
     strategy_rules = {**strategy_rules, **overrides}
+
+    # Day 9: Tune-panel signal thresholds (echoed in `strategy`, so what the
+    # user set is exactly what is shown as simulated).
+    # (getattr: callers that build their own payload object predate these.)
+    rsi_buy = getattr(payload, "rsi_buy_below", None)
+    rsi_sell = getattr(payload, "rsi_sell_above", None)
+    if rsi_buy is not None and rsi_sell is not None and rsi_buy >= rsi_sell:
+        raise HTTPException(
+            status_code=422,
+            detail="RSI buy-below must be lower than RSI sell-above.",
+        )
+    if rsi_buy is not None:
+        kept = [r for r in strategy_rules["buy_rules"] if not r.startswith("rsi <")]
+        strategy_rules["buy_rules"] = kept + [f"rsi < {rsi_buy:g}"]
+    if rsi_sell is not None:
+        strategy_rules["sell_rules"] = [f"rsi > {rsi_sell:g}"]
 
     # Tier 4: validate the optional date range (pattern already constrains
     # format; reject start > end up front with a clear 422).

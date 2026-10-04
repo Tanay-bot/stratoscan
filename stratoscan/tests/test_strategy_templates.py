@@ -153,18 +153,18 @@ for t in TEMPLATES:
 print("✅ every template backtests on up/choppy/down synthetic markets; median hold ≥ 10 "
       "trading days, never a same-bar exit")
 
-# Why momentum templates are not in the library (pinned so that when the
-# engine's momentum exit changes, this fails and says the door is open).
+# Day 9: momentum no longer churns (it did: median hold 1 day on this uptrend
+# with the old "rsi > 70" exit). The momentum templates depend on this.
 iq, _ = PARSER.parse("large cap stocks with bullish momentum above their 50-day moving average")
 momentum = _translate_to_rules(iq)
-assert momentum["buy_rules"] == ["price > sma_50"] and momentum["sell_rules"] == ["rsi > 70"]
+assert momentum["buy_rules"] == ["price > sma_50", "sma_50 > sma_200"], momentum["buy_rules"]
+assert momentum["sell_rules"] == ["price < sma_200"], momentum["sell_rules"]
 _, up_days = holds(momentum)["up"]
-assert np.median(up_days) < 3, (
-    "momentum no longer churns — revisit the excluded momentum templates in "
-    "src/strategy_templates.py"
-)
-print(f"✅ known limit pinned: momentum entry + RSI-70 exit churns (median hold "
-      f"{int(np.median(up_days))} day on an uptrend) — excluded from the library")
+assert np.median(up_days) >= 10, f"momentum churns again: median hold {np.median(up_days)}"
+old = holds({**momentum, "buy_rules": ["price > sma_50"], "sell_rules": ["rsi > 70"]})["up"][1]
+assert np.median(old) < 3, "the pre-Day-9 pair should still demonstrate the churn"
+print(f"✅ momentum holds a median {int(np.median(up_days))} days on the uptrend "
+      f"(the pre-Day-9 rules: {int(np.median(old))})")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

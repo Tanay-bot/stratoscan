@@ -3,6 +3,19 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 9 (part) — Momentum stops churning; Tune is real
+
+**Shipped (approved signal change):** bullish momentum now enters on price above the 50-day
+inside an uptrend and exits when price breaks the 200-day — rules that cannot both be true,
+so the sim can no longer buy and sell on consecutive bars. Median holds went from 1 day to
+18–128 days; pinned by a new golden scenario, and the three momentum templates are back. The
+Tune panel's RSI fields are real request fields now.
+
+**Broke / found:** every UI backtest carried an 8% stop and 20% target nobody chose, and its
+RSI/SMA settings were appended to the query as text the parser ignored (and that then showed
+on share pages). The capital and SMA inputs were never read by the engine. A shared link's
+settings never applied to the run it triggered — hydrated one render too late.
+
 ## Day 8 — Nobody faces an empty box
 
 **Shipped:** twelve strategy templates that each parse for free, trade exactly what their

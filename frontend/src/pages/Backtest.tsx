@@ -92,30 +92,39 @@ export function Backtest() {
   const [conditions, setConditions] = useState<StrategyCondition[]>([])
 
   // Parameters
-  const [capital, setCapital] = useState(100000)
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [rsiBuy, setRsiBuy] = useState(30)
-  const [rsiSell, setRsiSell] = useState(70)
-  const [smaFast, setSmaFast] = useState(20)
-  const [smaSlow, setSmaSlow] = useState(50)
-  const [stopLoss, setStopLoss] = useState(8)
-  const [takeProfit, setTakeProfit] = useState(20)
-  const [allowShort, setAllowShort] = useState(false)
+  // Shareable links: the tune drawer starts FROM the URL. (It used to be
+  // hydrated by a mount effect, but the ?q= auto-run fires in the same commit
+  // with the pre-hydration state — so a shared link's settings never applied
+  // to the run it triggered.)
+  const [initial] = useState(() => parseParams(params))
+  const [startDate, setStartDate] = useState(initial.startDate)
+  const [endDate, setEndDate] = useState(initial.endDate)
+  // Day 9: Tune values are OVERRIDES. null = "use what the strategy text
+  // says" (and the engine's default: no stop, no target). Only values the
+  // user actually set are sent — previously an 8% stop and 20% target were
+  // silently applied to every run, and the RSI/SMA fields were appended to
+  // the query as text the parser never read.
+  const [rsiBuy, setRsiBuy] = useState<number | null>(initial.rsiBuy)
+  const [rsiSell, setRsiSell] = useState<number | null>(initial.rsiSell)
+  const [stopLoss, setStopLoss] = useState<number | null>(initial.stopLoss)
+  const [takeProfit, setTakeProfit] = useState<number | null>(initial.takeProfit)
+  const [allowShort, setAllowShort] = useState(initial.allowShort)
   // Portfolio breadth: how many top-ranked matches the engine backtests.
   // The screener ranks the WHOLE universe against the strategy and the
   // engine backtests the top N (filling in next-ranked candidates when a
   // pick has no usable price history). More stocks = longer runs.
-  const [topN, setTopN] = useState(5)
+  const [topN, setTopN] = useState(initial.topN)
   // Tier 5 portfolio: shared pool + allocation + rebalance schedule
-  const [portfolioAllocation, setPortfolioAllocation] = useState<'equal' | 'risk_based'>('equal')
+  const [portfolioAllocation, setPortfolioAllocation] = useState<'equal' | 'risk_based'>(
+    initial.allocation,
+  )
   const [rebalanceFrequency, setRebalanceFrequency] = useState<
     'none' | 'monthly' | 'quarterly' | 'yearly'
-  >('none')
+  >(initial.rebalance)
   // Tier 5 cash accounting + diversification
-  const [dividendReinvest, setDividendReinvest] = useState(false)
-  const [borrowRate, setBorrowRate] = useState(0)
-  const [maxSector, setMaxSector] = useState(0)
+  const [dividendReinvest, setDividendReinvest] = useState(initial.reinvest)
+  const [borrowRate, setBorrowRate] = useState(initial.borrow)
+  const [maxSector, setMaxSector] = useState(initial.sector)
   // Tier 3: async job progress + compare mode + shareable links
   const [jobStatus, setJobStatus] = useState<BacktestJobStatus | null>(null)
   const [baseline, setBaseline] = useState<BacktestResponse | null>(null)
@@ -130,24 +139,6 @@ export function Backtest() {
   const [trialLeft, setTrialLeft] = useState<number | null>(null)
   const [trialExhausted, setTrialExhausted] = useState(false)
 
-  // Tier 3 shareable links: hydrate the tune drawer from URL params when a
-  // shared link lands (q triggers the run via the existing effect below).
-  useEffect(() => {
-    const p = parseParams(params)
-    setTopN(p.topN)
-    setStopLoss(p.stopLoss)
-    setTakeProfit(p.takeProfit)
-    setAllowShort(p.allowShort)
-    setStartDate(p.startDate)
-    setEndDate(p.endDate)
-    setPortfolioAllocation(p.allocation)
-    setRebalanceFrequency(p.rebalance)
-    setDividendReinvest(p.reinvest)
-    setBorrowRate(p.borrow)
-    setMaxSector(p.sector)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   const pushMsg = (role: ChatMessage['role'], text: string, meta?: string[]) => {
     setMessages((m) => [...m, { id: ++msgId.current, role, text, meta }])
   }
@@ -155,16 +146,19 @@ export function Backtest() {
   /** Build the full BacktestRequest from the current tune-drawer state. */
   const buildRequest = (q: string): BacktestRequest => {
     // Fold strategy-builder conditions into the query so the demo + LLM both use them
+    // Strategy-builder conditions are the user's own words, folded into the
+    // query; numeric overrides travel as structured fields below.
     const builderClause = strategyToSentence(conditions)
-    const signalClause = `momentum: RSI buy below ${rsiBuy}, RSI sell above ${rsiSell}, SMA cross ${smaFast}/${smaSlow}`
     const fullQuery = conditions.length
-      ? `${q} — strategy: ${builderClause.replace('When ', '')} — ${signalClause}`
-      : `${q} — ${signalClause}`
+      ? `${q} — strategy: ${builderClause.replace('When ', '')}`
+      : q
     return {
       query: fullQuery,
       top_n: topN,
       stop_loss_pct: stopLoss,
       take_profit_pct: takeProfit,
+      rsi_buy_below: rsiBuy,
+      rsi_sell_above: rsiSell,
       allow_short: allowShort,
       start_date: startDate || null,
       end_date: endDate || null,
@@ -339,13 +333,11 @@ export function Backtest() {
   }, [active])
 
   const codeParams: CodeParams = {
-    capital,
+    capital: 100000,
     startDate,
     endDate,
     rsiBuy,
     rsiSell,
-    smaFast,
-    smaSlow,
     stopLoss,
     takeProfit,
     allowShort,
@@ -503,27 +495,14 @@ export function Backtest() {
           Risk & execution
         </p>
         <div className="mt-3 space-y-3">
-          <div>
-            <label
-              htmlFor="capital"
-              className="flex items-center justify-between text-xs text-text-mid"
-            >
-              <span className="flex items-center gap-1.5">
-                <DollarSign className="h-3.5 w-3.5 text-neon" aria-hidden="true" /> Initial capital
-              </span>
-              <span className="font-mono tabular text-text-hi">{fmtCurrency(capital, 0)}</span>
-            </label>
-            <input
-              id="capital"
-              type="range"
-              min={10000}
-              max={1000000}
-              step={10000}
-              value={capital}
-              onChange={(e) => setCapital(Number(e.target.value))}
-              className="mt-2"
-            />
-          </div>
+          <p className="flex items-center justify-between text-xs text-text-mid">
+            <span className="flex items-center gap-1.5">
+              <DollarSign className="h-3.5 w-3.5 text-neon" aria-hidden="true" /> Starting capital
+            </span>
+            <span className="font-mono tabular text-text-hi">
+              {fmtCurrency(100000, 0)} <span className="text-text-low">(fixed)</span>
+            </span>
+          </p>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -533,8 +512,10 @@ export function Backtest() {
               <Input
                 id="stop"
                 type="number"
-                value={stopLoss}
-                onChange={(e) => setStopLoss(Number(e.target.value))}
+                value={stopLoss ?? ''}
+                placeholder="off"
+                min={0}
+                onChange={(e) => setStopLoss(e.target.value === '' ? null : Number(e.target.value))}
                 className="mt-1 h-9"
               />
             </div>
@@ -545,8 +526,12 @@ export function Backtest() {
               <Input
                 id="profit"
                 type="number"
-                value={takeProfit}
-                onChange={(e) => setTakeProfit(Number(e.target.value))}
+                value={takeProfit ?? ''}
+                placeholder="off"
+                min={0}
+                onChange={(e) =>
+                  setTakeProfit(e.target.value === '' ? null : Number(e.target.value))
+                }
                 className="mt-1 h-9"
               />
             </div>
@@ -563,7 +548,11 @@ export function Backtest() {
 
       <div className="glass rounded-2xl p-4">
         <p className="text-2xs font-semibold uppercase tracking-wider text-text-low">
-          Momentum signals
+          Signal thresholds
+        </p>
+        <p className="mt-1 text-2xs text-text-low">
+          Leave blank to use what your strategy says. A value here replaces the strategy&apos;s RSI
+          entry or exit, and the result shows exactly which rules ran.
         </p>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
@@ -573,8 +562,10 @@ export function Backtest() {
             <Input
               id="rsiBuy"
               type="number"
-              value={rsiBuy}
-              onChange={(e) => setRsiBuy(Number(e.target.value))}
+              value={rsiBuy ?? ''}
+              placeholder="from strategy"
+              min={0}
+              onChange={(e) => setRsiBuy(e.target.value === '' ? null : Number(e.target.value))}
               className="mt-1 h-9"
             />
           </div>
@@ -585,32 +576,10 @@ export function Backtest() {
             <Input
               id="rsiSell"
               type="number"
-              value={rsiSell}
-              onChange={(e) => setRsiSell(Number(e.target.value))}
-              className="mt-1 h-9"
-            />
-          </div>
-          <div>
-            <label htmlFor="smaFast" className="text-xs text-text-mid">
-              SMA fast period
-            </label>
-            <Input
-              id="smaFast"
-              type="number"
-              value={smaFast}
-              onChange={(e) => setSmaFast(Number(e.target.value))}
-              className="mt-1 h-9"
-            />
-          </div>
-          <div>
-            <label htmlFor="smaSlow" className="text-xs text-text-mid">
-              SMA slow period
-            </label>
-            <Input
-              id="smaSlow"
-              type="number"
-              value={smaSlow}
-              onChange={(e) => setSmaSlow(Number(e.target.value))}
+              value={rsiSell ?? ''}
+              placeholder="from strategy"
+              min={0}
+              onChange={(e) => setRsiSell(e.target.value === '' ? null : Number(e.target.value))}
               className="mt-1 h-9"
             />
           </div>
