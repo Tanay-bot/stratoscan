@@ -29,9 +29,9 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 
 | Auth level | Meaning | Endpoints |
 |---|---|---|
-| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback`, `/try/session`, `/r/{share_id}`, `/r/{share_id}.json` |
+| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback`, `/try/session`, `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png`, `/email/unsubscribe` (signed `token` in the query string) |
 | `trial` | `X-Anon-Token` from `POST /try/session` (401 without); `/results/*` also accept a Bearer token instead | `/try/backtest`, `/try/backtest/{job_id}`, `/results/share`, `/results/share/{share_id}`, `/results/shares` |
-| `bearer` | Valid JWT required (401 without) | `/try/claim` (plus `X-Anon-Token`), `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal` |
+| `bearer` | Valid JWT required (401 without) | `/try/claim` (plus `X-Anon-Token`), `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal`, `/me/strategies`, `/me/strategies/{strategy_id}`, `/me/email-preferences` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -294,6 +294,41 @@ fallback to the trial identity).
 `url` uses `SHARE_BASE_URL` (the API's public origin) when set, else the
 request's own origin. Share ids are 128-bit random; deleting an account
 deletes its links.
+
+### Saved strategies + the weekly email — `/me/strategies`, `/me/email-preferences` (bearer)
+
+Following a strategy saves it; once a week its owner gets one email on how it
+has done **since the day it was saved**, next to SPY over the same days.
+
+- `POST /me/strategies` `{job_id}` → `{error: false, strategy}` for a finished
+  async job you own (404 otherwise, 409 while it runs, 422 when it matched no
+  stocks, 409 at the cap of 20). Like sharing, the browser sends only the job
+  id: the query, the rules the engine actually ran (`strategy.buy_rules` /
+  `sell_rules`), up to 10 symbols and the headline return are read from the
+  server's stored result. Re-runs never call an LLM.
+- `GET /me/strategies` → `{strategies: [{id, query, symbols, rules{buy_rules,
+  sell_rules}, saved_return_pct, saved_at}]}`, newest first.
+- `DELETE /me/strategies/{strategy_id}` — stop following; 404 for one you do
+  not own.
+- `GET /me/email-preferences` → `{weekly_digest, email_verified}`;
+  `PUT /me/email-preferences` `{weekly_digest: bool}`. On by default. The
+  digest only goes to verified addresses, and every send re-reads this flag
+  first, so turning it off stops the next email even mid-run.
+
+**The email** (scheduler job `weekly_digest`, daily at `DIGEST_TIME`, at most
+once per user per ISO week): up to 3 strategies, each re-run on up to 5 of its
+symbols with the saved rules. It reports losses as losses (the subject says
+"down"), says when a stock no longer matches the screen and which new ones do,
+and says "too early" before 5 days have passed. Every email carries
+`List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`.
+
+**Unsubscribe — `/email/unsubscribe?token=…`** (no login; the token is signed,
+typed `unsub`, valid 400 days, and is refused as a session everywhere):
+- `GET` shows a confirm page with one button. It **never** unsubscribes —
+  mail scanners prefetch links.
+- `POST` turns `weekly_digest` off at once (RFC 8058 one-click posts here
+  too). A bad or wrong-kind token → 400 page.
+Links are built on `SHARE_BASE_URL`; with it unset the digest sends nothing.
 
 ### `GET /me/personal` and `PUT /me/personal` — per-user saved state (bearer)
 

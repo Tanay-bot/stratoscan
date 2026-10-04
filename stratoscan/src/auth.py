@@ -270,6 +270,38 @@ def verify_anon_token(token: Optional[str]) -> Optional[str]:
     return aid
 
 
+# ── Unsubscribe tokens (Day 10: the weekly digest) ───────────────────────────
+# Every digest email carries a one-click unsubscribe link. It must work
+# without logging in (that is the law, and the point), so it carries a signed
+# user id — typed "unsub" so it can never stand in for a session: an account
+# token has NO typ, and get_current_user refuses every typed token.
+UNSUBSCRIBE_TOKEN_TYPE = "unsub"
+UNSUBSCRIBE_TOKEN_TTL_SECONDS = 400 * 24 * 3600  # links in old emails keep working
+
+
+def create_unsubscribe_token(user_id: int) -> str:
+    now = int(time.time())
+    return _sign_payload({
+        "typ": UNSUBSCRIBE_TOKEN_TYPE,
+        "sub": str(int(user_id)),
+        "iat": now,
+        _TOKEN_TTL: now + UNSUBSCRIBE_TOKEN_TTL_SECONDS,
+    })
+
+
+def verify_unsubscribe_token(token: Optional[str]) -> Optional[int]:
+    """The user id inside a valid unsubscribe token, else None."""
+    if not token:
+        return None
+    payload = verify_access_token(token.strip())
+    if not payload or payload.get("typ") != UNSUBSCRIBE_TOKEN_TYPE:
+        return None
+    try:
+        return int(payload["sub"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FastAPI dependencies
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -320,9 +352,10 @@ def get_current_user(request: Request) -> Dict[str, Any]:
             status_code=401,
             detail="Invalid or expired token. Log in again to get a fresh one.",
         )
-    # An anonymous trial token is validly signed but belongs to nobody; it
-    # must never pass as an account session.
-    if payload.get("typ") == ANON_TOKEN_TYPE:
+    # Purpose tokens (anonymous trial, unsubscribe, …) are validly signed but
+    # are never sessions. Account tokens carry no ``typ`` at all, so ANY typed
+    # token is refused — including kinds added after this line was written.
+    if payload.get("typ") is not None:
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired token. Log in again to get a fresh one.",

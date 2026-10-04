@@ -687,6 +687,53 @@ SHARED_RESULTS_INDEXES = [
     "ON shared_results (job_id);",
 ]
 
+# ── Saved strategies + weekly digest (Day 10: a reason to come back) ────────
+# A saved strategy is a snapshot the SERVER builds from a finished job the
+# user owns: the query, the exact rules the engine ran (the strategy echo) and
+# the candidate symbols at that moment. The weekly digest re-runs those rules
+# over the period since saving — no LLM call, nothing taken from a browser.
+SAVED_STRATEGIES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS saved_strategies (
+    id               BIGSERIAL PRIMARY KEY,
+    user_id          BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    query            TEXT NOT NULL,
+    rules            JSONB NOT NULL,
+    symbols          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    saved_return_pct DOUBLE PRECISION,
+    saved_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
+SAVED_STRATEGIES_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_saved_strategies_user ON saved_strategies (user_id);",
+]
+
+# One row per (user, ISO week): the digest's double-send guard. A row is
+# claimed ('sending') BEFORE the email goes out and marked 'sent' after; a
+# crash in between leaves 'sending', which is never retried — a missed email
+# is recoverable, a duplicate is not. 'failed' (provider refused) is retried
+# on a later run that week, at most DIGEST_MAX_ATTEMPTS times.
+DIGEST_SENDS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS digest_sends (
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    week_key   TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 1,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, week_key)
+);
+"""
+
+# Opt-out lives on the user: default ON for verified accounts, one-click off.
+USERS_WEEKLY_DIGEST_BACKFILL = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_digest BOOLEAN NOT NULL DEFAULT TRUE",
+]
+
+MAX_SAVED_STRATEGIES = 20
+DIGEST_MAX_ATTEMPTS = 3
+# pg_advisory_lock key for the digest job ("SSDIGEST" as an int64-ish constant).
+DIGEST_LOCK_KEY = 0x5353444947455354 & 0x7FFFFFFFFFFFFFFF
+
 # Async-job owner key for an anonymous trial session. Stored in
 # ``backtest_jobs.user_email`` (an owner column in practice): it can never
 # collide with a real address because it contains no "@".
@@ -819,6 +866,7 @@ class PostgresDB:
                     + USERS_TOKEN_VERSION_BACKFILL
                     + USERS_PASSWORD_RESET_BACKFILL
                     + USERS_GOOGLE_SUB_BACKFILL
+                    + USERS_WEEKLY_DIGEST_BACKFILL
                 ):
                     try:
                         cur.execute(stmt)
@@ -847,10 +895,15 @@ class PostgresDB:
                 cur.execute(SHARED_RESULTS_SCHEMA)
                 for idx in SHARED_RESULTS_INDEXES:
                     cur.execute(idx)
+                cur.execute(SAVED_STRATEGIES_SCHEMA)
+                for idx in SAVED_STRATEGIES_INDEXES:
+                    cur.execute(idx)
+                cur.execute(DIGEST_SENDS_SCHEMA)
             conn.commit()
         logger.info(
             "PostgreSQL stock_master + users + job monitoring + backtest_jobs "
-            "+ events + error_log + shared_results schema initialized"
+            "+ events + error_log + shared_results + saved_strategies + digest_sends "
+            "schema initialized"
         )
 
     # ── User CRUD (auth) ──────────────────────────────────────────────
@@ -1371,9 +1424,14 @@ class PostgresDB:
                         "(SELECT email FROM users WHERE id = %s)",
                         (user_id,),
                     )
-                    # ...and any public links the squatter published.
+                    # ...and any public links the squatter published, and the
+                    # strategies they saved (the real owner must not start
+                    # receiving a stranger's weekly digest).
                     cur.execute(
                         "DELETE FROM shared_results WHERE owner_user_id = %s", (user_id,)
+                    )
+                    cur.execute(
+                        "DELETE FROM saved_strategies WHERE user_id = %s", (user_id,)
                     )
                 conn.commit()
             except Exception:
@@ -1582,6 +1640,166 @@ class PostgresDB:
                 conn.rollback()
                 raise
         return {"jobs": jobs, "shares": shares}
+
+    # ── Saved strategies + weekly digest (Day 10) ──────────────────────
+
+    def count_strategies(self, user_id: int) -> int:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM saved_strategies WHERE user_id = %s", (user_id,))
+                return int(cur.fetchone()[0] or 0)
+
+    def save_strategy(
+        self,
+        user_id: int,
+        query: str,
+        rules: Dict[str, Any],
+        symbols: List[str],
+        saved_return_pct: Optional[float],
+    ) -> Dict[str, Any]:
+        """Store one strategy snapshot; returns the stored row."""
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "INSERT INTO saved_strategies (user_id, query, rules, symbols, saved_return_pct) "
+                    "VALUES (%s, %s, %s::jsonb, %s::jsonb, %s) "
+                    "RETURNING id, query, rules, symbols, saved_return_pct, saved_at",
+                    (user_id, query, json.dumps(rules), json.dumps(symbols), saved_return_pct),
+                )
+                row = dict(cur.fetchone())
+            conn.commit()
+        return row
+
+    def list_strategies(self, user_id: int) -> List[Dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id, query, rules, symbols, saved_return_pct, saved_at "
+                    "FROM saved_strategies WHERE user_id = %s ORDER BY saved_at DESC, id DESC",
+                    (user_id,),
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+    def delete_strategy(self, user_id: int, strategy_id: int) -> bool:
+        """Owner-scoped in the WHERE clause: anyone else's id matches nothing."""
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM saved_strategies WHERE id = %s AND user_id = %s",
+                    (strategy_id, user_id),
+                )
+                deleted = cur.rowcount
+            conn.commit()
+        return deleted > 0
+
+    def get_weekly_digest(self, user_id: int) -> Optional[bool]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT weekly_digest FROM users WHERE id = %s", (user_id,))
+                row = cur.fetchone()
+        return None if row is None else bool(row[0])
+
+    def set_weekly_digest(self, user_id: int, enabled: bool) -> bool:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET weekly_digest = %s WHERE id = %s", (bool(enabled), user_id)
+                )
+                updated = cur.rowcount
+            conn.commit()
+        return updated > 0
+
+    def digest_candidates(self, week_key: str, limit: int) -> List[Dict[str, Any]]:
+        """Users due a digest this week: opted in, verified, with at least one
+        saved strategy, and no 'sent'/'sending' row for the week (a 'failed'
+        row is due again until DIGEST_MAX_ATTEMPTS)."""
+        with self._get_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT u.id, u.email
+                    FROM users u
+                    WHERE u.weekly_digest AND u.email_verified
+                      AND EXISTS (SELECT 1 FROM saved_strategies s WHERE s.user_id = u.id)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM digest_sends d
+                          WHERE d.user_id = u.id AND d.week_key = %s
+                            AND (d.status <> 'failed' OR d.attempts >= %s)
+                      )
+                    ORDER BY u.id
+                    LIMIT %s
+                    """,
+                    (week_key, DIGEST_MAX_ATTEMPTS, limit),
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+    def claim_digest(self, user_id: int, week_key: str) -> bool:
+        """Atomically take this week's send for this user. True = ours to send.
+
+        A fresh row, or a 'failed' row under the attempt cap, is claimed; a
+        'sent' or 'sending' row (another run, or a crash mid-send) is not.
+        """
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO digest_sends (user_id, week_key, status, attempts)
+                    VALUES (%s, %s, 'sending', 1)
+                    ON CONFLICT (user_id, week_key) DO UPDATE
+                        SET status = 'sending',
+                            attempts = digest_sends.attempts + 1,
+                            updated_at = NOW()
+                        WHERE digest_sends.status = 'failed'
+                          AND digest_sends.attempts < %s
+                    RETURNING user_id
+                    """,
+                    (user_id, week_key, DIGEST_MAX_ATTEMPTS),
+                )
+                claimed = cur.fetchone() is not None
+            conn.commit()
+        return claimed
+
+    def mark_digest(self, user_id: int, week_key: str, status: str) -> None:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE digest_sends SET status = %s, updated_at = NOW() "
+                    "WHERE user_id = %s AND week_key = %s",
+                    (status, user_id, week_key),
+                )
+            conn.commit()
+
+    def digest_lock(self):
+        """A session-scoped advisory lock for one digest run.
+
+        Returns a context manager yielding True when this process holds the
+        lock, False when another run does. It uses its OWN short-lived
+        connection (not the shared pool): the lock lives exactly as long as
+        that session, so a crashed holder releases it automatically, and the
+        connection is closed at the end so Neon can suspend.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _lock():
+            conn = psycopg2.connect(
+                self._database_url, connect_timeout=settings.db_connect_timeout
+            )
+            try:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pg_try_advisory_lock(%s)", (DIGEST_LOCK_KEY,))
+                    held = bool(cur.fetchone()[0])
+                try:
+                    yield held
+                finally:
+                    if held:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT pg_advisory_unlock(%s)", (DIGEST_LOCK_KEY,))
+            finally:
+                conn.close()
+
+        return _lock()
 
     # ── Per-user saved data (watchlist / screeners / backtests) ────────
 

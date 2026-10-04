@@ -3,6 +3,24 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 10 — A saved strategy writes back
+
+**Shipped:** "Follow weekly" on any finished backtest saves it — the rules the engine actually
+ran, not the words typed — and once a week its owner gets one email on how it has done since
+that day, next to SPY over the same days: losses called losses in the subject, stocks that no
+longer screen in named, "too early" before there is a week to show. A Saved strategies panel on
+the dashboard, a real on/off switch under Settings → Email, and an unsubscribe link that works
+without signing in (one click from the mail app, a confirm button from a browser). Provider-down
+drill: three failures and the run stops; tomorrow's pass sends each person exactly once.
+
+**Broke / found:** the Settings page had three notification switches that were never sent
+anywhere — removed. With `SHARE_BASE_URL` unset, unsubscribe links would have pointed at the
+frontend and 404'd, so the digest now refuses to send without it (and it was never staged by
+the deploy workflow — now it is). The session check named the trial token's type explicitly, so
+a new kind (the unsubscribe token) would have been kept out only by a missing claim; any typed
+token is now refused outright. Capacity note: SendGrid's
+free tier is ~100 emails/day across verification, resets and the digest — the per-run cap is 60.
+
 ## Day 9 — Simple on the surface, deep underneath
 
 **Shipped:** five layers on the backtest — the box, the result, then three collapsed panels

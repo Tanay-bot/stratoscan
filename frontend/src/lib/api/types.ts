@@ -143,6 +143,21 @@ export interface ShareListItem extends ShareLink {
   } | null
 }
 
+/** Day 10: a strategy the owner follows — re-run weekly and emailed to them. */
+export interface SavedStrategy {
+  id: number
+  query: string
+  symbols: string[]
+  rules: { buy_rules: string[]; sell_rules: string[] }
+  saved_return_pct: number | null
+  saved_at: string
+}
+
+export interface EmailPreferences {
+  weekly_digest: boolean
+  email_verified: boolean
+}
+
 export interface PortfolioSummary {
   allocation: 'equal' | 'risk_based'
   rebalance: 'none' | 'monthly' | 'quarterly' | 'yearly'

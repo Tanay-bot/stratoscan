@@ -11,6 +11,8 @@ vi.mock('@/lib/api/services', () => ({
   deleteAccount: vi.fn(async () => ({ error: false, message: 'Deleted.' })),
   changePassword: vi.fn(),
   logoutEverywhere: vi.fn(async () => ({ error: false, message: 'ok' })),
+  getEmailPreferences: vi.fn(async () => ({ weekly_digest: true, email_verified: true })),
+  setWeeklyDigest: vi.fn(async () => undefined),
 }))
 
 import * as services from '@/lib/api/services'
@@ -68,5 +70,49 @@ describe('Settings — account deletion', () => {
     await userEvent.click(screen.getByRole('button', { name: /permanently delete/i }))
     expect(await screen.findByText(/password is incorrect/i)).toBeInTheDocument()
     expect(useAuth.getState().token).toBe('tok')
+  })
+})
+
+describe('Settings — the weekly email (Day 10)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useAuth.setState({
+      token: 'tok',
+      user: { id: 1, email: 'me@x.test', plan: 'free', email_verified: true, is_admin: false },
+    })
+  })
+
+  it('shows the server value and turns it off at once', async () => {
+    renderSettings()
+    const sw = await screen.findByRole('switch', { name: /weekly update on my saved strategies/i })
+    await vi.waitFor(() => expect(sw).toBeEnabled())
+    expect(sw).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(sw)
+    expect(services.setWeeklyDigest).toHaveBeenCalledWith(false)
+    expect(sw).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('puts the switch back when saving fails', async () => {
+    vi.mocked(services.setWeeklyDigest).mockRejectedValueOnce(new Error('offline'))
+    renderSettings()
+    const sw = await screen.findByRole('switch', { name: /weekly update/i })
+    await vi.waitFor(() => expect(sw).toBeEnabled())
+    await userEvent.click(sw)
+    await vi.waitFor(() => expect(sw).toHaveAttribute('aria-checked', 'true'))
+  })
+
+  it('says an unverified address gets nothing until it is confirmed', async () => {
+    vi.mocked(services.getEmailPreferences).mockResolvedValueOnce({
+      weekly_digest: true,
+      email_verified: false,
+    })
+    renderSettings()
+    expect(await screen.findByText(/verify your email address to receive it/i)).toBeInTheDocument()
+  })
+
+  it('no longer shows switches that never sent anything', () => {
+    renderSettings()
+    expect(screen.queryByText(/product updates/i)).toBeNull()
+    expect(screen.queryByText(/news digests/i)).toBeNull()
   })
 })

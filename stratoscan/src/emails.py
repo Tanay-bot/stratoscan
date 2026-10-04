@@ -37,7 +37,7 @@ import smtplib
 import urllib.error
 import urllib.request
 from email.message import EmailMessage
-from typing import Optional
+from typing import Dict, Optional
 
 from src.config import settings
 
@@ -82,11 +82,23 @@ def build_verification_url(token: str) -> str:
     return f"{base}/verify-email?token={token}"
 
 
+def _safe_headers(headers: Optional[Dict[str, str]]) -> Dict[str, str]:
+    """Extra headers with CR/LF anywhere dropped (header-injection defence)."""
+    out: Dict[str, str] = {}
+    for k, v in (headers or {}).items():
+        if any(c in f"{k}{v}" for c in "\r\n") or not k:
+            logger.warning("Dropped an email header containing a line break")
+            continue
+        out[str(k)] = str(v)
+    return out
+
+
 def send_email(
     to_email: str,
     subject: str,
     text_body: str,
     html_body: Optional[str] = None,
+    headers: Optional[Dict[str, str]] = None,
 ) -> bool:
     """Send a transactional email over the configured transport.
 
@@ -102,14 +114,17 @@ def send_email(
         text_body: Plain-text body.
         html_body: Optional HTML body (plain text is always included as a
             fallback for mail clients that block HTML).
+        headers: Optional extra headers (e.g. ``List-Unsubscribe`` for the
+            weekly digest). Any containing a line break is dropped.
 
     Returns:
         True if SendGrid accepted the message (HTTP 202); False on any
         failure (unconfigured key, network error, API error). Never raises
         — callers use the boolean to decide how to degrade.
     """
+    extra = _safe_headers(headers)
     if settings.smtp_host:
-        return _send_via_smtp(to_email, subject, text_body, html_body)
+        return _send_via_smtp(to_email, subject, text_body, html_body, extra)
 
     if not settings.sendgrid_api_key:
         logger.warning(
@@ -128,6 +143,8 @@ def send_email(
         "subject": subject,
         "content": content,
     }
+    if extra:
+        payload["headers"] = extra
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         SENDGRID_MAIL_URL,
@@ -307,6 +324,7 @@ def _send_via_smtp(
     subject: str,
     text_body: str,
     html_body: Optional[str] = None,
+    headers: Optional[Dict[str, str]] = None,
 ) -> bool:
     """Send a transactional email over SMTP (``smtplib``, stdlib).
 
@@ -337,6 +355,8 @@ def _send_via_smtp(
         message["To"] = to_email
         message["From"] = settings.email_from_address
         message["Subject"] = subject
+        for name, value in (headers or {}).items():
+            message[name] = value
         message.set_content(text_body)
         if html_body:
             message.add_alternative(html_body, subtype="html")

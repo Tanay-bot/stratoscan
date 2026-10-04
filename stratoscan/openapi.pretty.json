@@ -1337,6 +1337,245 @@
         }
       }
     },
+    "/me/strategies": {
+      "get": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "My saved strategies",
+        "operationId": "list_saved_strategies_me_strategies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "Save a finished backtest as a strategy to follow",
+        "description": "Snapshot a finished job you own. The weekly digest then reports what\nit would have done since today. Capped at MAX_SAVED_STRATEGIES.",
+        "operationId": "save_strategy_me_strategies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveStrategyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/strategies/{strategy_id}": {
+      "delete": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "Stop following a saved strategy",
+        "operationId": "delete_saved_strategy_me_strategies__strategy_id__delete",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/email-preferences": {
+      "get": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "My email preferences",
+        "operationId": "get_email_preferences_me_email_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "Change my email preferences",
+        "operationId": "put_email_preferences_me_email_preferences_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailPreferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email/unsubscribe": {
+      "get": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "Unsubscribe page (confirm button; GET never unsubscribes)",
+        "description": "Shows a one-button confirmation. A GET changes nothing on purpose:\nmail scanners prefetch links, and a GET that unsubscribed would opt\npeople out without them ever clicking.",
+        "operationId": "unsubscribe_page_email_unsubscribe_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Strategies"
+        ],
+        "summary": "Unsubscribe (one-click, RFC 8058)",
+        "description": "Turns the weekly digest off immediately \u2014 honoured by the very next\nsend, including a pass already in progress (it re-reads the flag).",
+        "operationId": "unsubscribe_email_unsubscribe_post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/backtest/export": {
       "post": {
         "tags": [
@@ -2910,6 +3149,19 @@
         "title": "DeleteAccountRequest",
         "description": "Request body for permanently deleting the signed-in account."
       },
+      "EmailPreferences": {
+        "properties": {
+          "weekly_digest": {
+            "type": "boolean",
+            "title": "Weekly Digest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weekly_digest"
+        ],
+        "title": "EmailPreferences"
+      },
       "EndpointMeta": {
         "properties": {
           "path": {
@@ -3557,6 +3809,23 @@
         ],
         "title": "RegisterRequest",
         "description": "Request body for creating a new account."
+      },
+      "SaveStrategyRequest": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 3,
+            "title": "Job Id",
+            "description": "A finished async backtest you own"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "SaveStrategyRequest",
+        "description": "Save a finished backtest as a strategy to follow (Day 10)."
       },
       "ScreenRequest": {
         "properties": {

@@ -18,6 +18,7 @@ import re
 import secrets
 import threading
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -937,6 +938,16 @@ class DeleteAccountRequest(BaseModel):
     """Request body for permanently deleting the signed-in account."""
 
     password: str = Field(..., min_length=1, max_length=128, description="Current password")
+
+
+class SaveStrategyRequest(BaseModel):
+    """Save a finished backtest as a strategy to follow (Day 10)."""
+
+    job_id: str = Field(..., min_length=3, max_length=64, description="A finished async backtest you own")
+
+
+class EmailPreferences(BaseModel):
+    weekly_digest: bool
 
 
 class ShareRequest(BaseModel):
@@ -3031,7 +3042,9 @@ async def submit_event(request: Request, payload: EventRequest):
         from src.auth import verify_access_token
 
         claims = verify_access_token(auth_header[7:].strip())
-        if claims:
+        # A typed purpose token (trial, unsubscribe) is not a session and
+        # must not attribute events to the user id it carries.
+        if claims and claims.get("typ") is None:
             try:
                 user_id = int(claims.get("sub"))
             except (TypeError, ValueError):
@@ -4260,6 +4273,211 @@ async def public_share_page(request: Request, response: Response, share_id: str)
         image_url=f"{page_url}.png",
     )
     return HTMLResponse(page, headers=_SHARE_PAGE_HEADERS)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Day 10 — saved strategies and the weekly digest
+# ═══════════════════════════════════════════════════════════════════════════
+# A strategy is saved FROM a finished job the user owns (like sharing): the
+# server stores the query, the exact rules the engine ran and the candidate
+# symbols from its own stored result. The weekly digest re-runs those rules;
+# nothing the browser sends ever reaches the engine.
+
+
+def _strategy_out(row: Dict[str, Any]) -> Dict[str, Any]:
+    saved_at = row.get("saved_at")
+    return {
+        "id": int(row["id"]),
+        "query": row.get("query") or "",
+        "symbols": list(row.get("symbols") or []),
+        "rules": {
+            "buy_rules": list((row.get("rules") or {}).get("buy_rules") or []),
+            "sell_rules": list((row.get("rules") or {}).get("sell_rules") or []),
+        },
+        "saved_return_pct": row.get("saved_return_pct"),
+        "saved_at": saved_at.isoformat() if hasattr(saved_at, "isoformat") else str(saved_at or ""),
+    }
+
+
+@app.get("/me/strategies", summary="My saved strategies", tags=["Strategies"])
+async def list_saved_strategies(
+    request: Request, response: Response, user: Dict[str, Any] = Depends(get_current_user)
+):
+    from src.database import PostgresDB
+
+    rows = PostgresDB().list_strategies(int(user["id"]))
+    return {"strategies": [_strategy_out(r) for r in rows]}
+
+
+@app.post("/me/strategies", summary="Save a finished backtest as a strategy to follow", tags=["Strategies"])
+async def save_strategy(
+    request: Request,
+    response: Response,
+    payload: SaveStrategyRequest,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Snapshot a finished job you own. The weekly digest then reports what
+    it would have done since today. Capped at MAX_SAVED_STRATEGIES."""
+    from src.database import MAX_SAVED_STRATEGIES, PostgresDB
+    from src.share_page import build_share_summary
+
+    snapshot = _owned_job_snapshot(payload.job_id, user.get("email") or "")
+    result = snapshot.get("result")
+    if snapshot.get("status") != "done" or not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="This backtest hasn't finished yet.")
+    rules = result.get("strategy")
+    symbols = list((result.get("results") or {}).keys())[:10]
+    if not symbols or not isinstance(rules, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="There's nothing to follow — this strategy matched no stocks.",
+        )
+    db = PostgresDB()
+    uid = int(user["id"])
+    if db.count_strategies(uid) >= MAX_SAVED_STRATEGIES:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You can follow up to {MAX_SAVED_STRATEGIES} strategies. Remove one first.",
+        )
+    headline = build_share_summary(result).get("headline") or {}
+    row = db.save_strategy(
+        uid,
+        str(result.get("query") or "")[:2000],
+        rules,
+        symbols,
+        headline.get("total_return_pct"),
+    )
+    return {"error": False, "strategy": _strategy_out(row)}
+
+
+@app.delete("/me/strategies/{strategy_id}", summary="Stop following a saved strategy", tags=["Strategies"])
+async def delete_saved_strategy(
+    request: Request,
+    response: Response,
+    strategy_id: int,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    from src.database import PostgresDB
+
+    if not PostgresDB().delete_strategy(int(user["id"]), strategy_id):
+        raise HTTPException(status_code=404, detail="Saved strategy not found")
+    return {"error": False}
+
+
+@app.get("/me/email-preferences", summary="My email preferences", tags=["Strategies"])
+async def get_email_preferences(
+    request: Request, response: Response, user: Dict[str, Any] = Depends(get_current_user)
+):
+    from src.database import PostgresDB
+
+    enabled = PostgresDB().get_weekly_digest(int(user["id"]))
+    return {"weekly_digest": bool(enabled), "email_verified": bool(user.get("email_verified"))}
+
+
+@app.put("/me/email-preferences", summary="Change my email preferences", tags=["Strategies"])
+async def put_email_preferences(
+    request: Request,
+    response: Response,
+    payload: EmailPreferences,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    from src.database import PostgresDB
+
+    PostgresDB().set_weekly_digest(int(user["id"]), payload.weekly_digest)
+    return {"error": False, "weekly_digest": payload.weekly_digest}
+
+
+_UNSUB_HEADERS = {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": (
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+        "base-uri 'none'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+def _unsub_page(title: str, body_html: str, status: int = 200) -> HTMLResponse:
+    import html as _html
+
+    page = (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<meta name=\"robots\" content=\"noindex\">"
+        f"<title>{_html.escape(title)} · Stratoscan</title>"
+        "<style>body{margin:0;background:#0a0a0f;color:#e8e8f0;font:16px/1.5 system-ui,sans-serif}"
+        "main{max-width:520px;margin:12vh auto;padding:0 16px}h1{font-size:22px}"
+        "button{background:#00d4ff;color:#0a0a0f;border:0;border-radius:10px;padding:11px 18px;"
+        "font-weight:600;font-size:15px;cursor:pointer}a{color:#00d4ff}</style></head>"
+        f"<body><main><h1>{_html.escape(title)}</h1>{body_html}</main></body></html>"
+    )
+    return HTMLResponse(page, status_code=status, headers=_UNSUB_HEADERS)
+
+
+@app.get(
+    "/email/unsubscribe",
+    summary="Unsubscribe page (confirm button; GET never unsubscribes)",
+    tags=["Strategies"],
+    response_class=HTMLResponse,
+)
+async def unsubscribe_page(request: Request, response: Response, token: str = ""):
+    """Shows a one-button confirmation. A GET changes nothing on purpose:
+    mail scanners prefetch links, and a GET that unsubscribed would opt
+    people out without them ever clicking."""
+    import html as _html
+
+    from src.auth import verify_unsubscribe_token
+
+    if verify_unsubscribe_token(token) is None:
+        return _unsub_page(
+            "This link has expired",
+            "<p>Sign in and turn weekly updates off under Settings → Email.</p>",
+            status=400,
+        )
+    action = _html.escape(f"/email/unsubscribe?token={urllib.parse.quote(token)}", quote=True)
+    return _unsub_page(
+        "Stop the weekly strategy email?",
+        "<p>You'll stop getting the weekly update on your saved strategies. "
+        "Account emails (like password resets) are not affected.</p>"
+        f'<form method="post" action="{action}"><button type="submit">Unsubscribe</button></form>',
+    )
+
+
+@app.post(
+    "/email/unsubscribe",
+    summary="Unsubscribe (one-click, RFC 8058)",
+    tags=["Strategies"],
+    response_class=HTMLResponse,
+)
+async def unsubscribe(request: Request, response: Response, token: str = ""):
+    """Turns the weekly digest off immediately — honoured by the very next
+    send, including a pass already in progress (it re-reads the flag)."""
+    from src.auth import verify_unsubscribe_token
+    from src.database import PostgresDB
+
+    uid = verify_unsubscribe_token(token)
+    if uid is None:
+        return _unsub_page(
+            "This link has expired",
+            "<p>Sign in and turn weekly updates off under Settings → Email.</p>",
+            status=400,
+        )
+    try:
+        PostgresDB().set_weekly_digest(uid, False)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Unsubscribe failed for user %s: %s", uid, e)
+        return _unsub_page(
+            "Something went wrong",
+            "<p>We couldn't update your preference just now. Please try again in a minute.</p>",
+            status=502,
+        )
+    app_url = settings.app_base_url.rstrip("/")
+    return _unsub_page(
+        "You're unsubscribed",
+        "<p>No more weekly strategy emails. You can turn them back on any time in "
+        f'<a href="{app_url}/app/settings#email">Settings</a>.</p>',
+    )
 
 
 @app.post(

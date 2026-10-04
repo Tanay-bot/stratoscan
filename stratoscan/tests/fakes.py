@@ -73,6 +73,11 @@ class FakeUserDB:
         self.jobs: Dict[str, Dict[str, Any]] = {}
         self.shares: Dict[str, Dict[str, Any]] = {}
         self._share_seq = 0
+        # Day 10: saved strategies, the per-week digest ledger, the run lock.
+        self.strategies: Dict[int, Dict[str, Any]] = {}
+        self.digest_sends: Dict[tuple, Dict[str, Any]] = {}
+        self._strategy_seq = 0
+        self.lock_held = False
         self._next_id = 1
 
     def _store(
@@ -105,6 +110,8 @@ class FakeUserDB:
             # key (NULL for email/password accounts) — the merge rule reads
             # it, so the fake must have it too.
             "google_sub": None,
+            # Day 10 opt-out — real rows default TRUE.
+            "weekly_digest": True,
             "created_at": "2026-07-31T00:00:00Z",
         }
         self._next_id += 1
@@ -277,6 +284,8 @@ class FakeUserDB:
                 user["token_version"] += 1
                 self._personal.pop(user_id, None)  # squatter's saved state goes
                 self._drop_shares(owner_user_id=user_id)
+                for sid in [k for k, r in self.strategies.items() if r["user_id"] == user_id]:
+                    del self.strategies[sid]
                 return user["token_version"]
         return 0
 
@@ -299,6 +308,10 @@ class FakeUserDB:
                 removed = 1
         self._personal.pop(user_id, None)
         self._drop_shares(owner_user_id=user_id)  # ON DELETE CASCADE
+        for sid in [k for k, r in self.strategies.items() if r["user_id"] == user_id]:
+            del self.strategies[sid]
+        for key in [k for k in self.digest_sends if k[0] == user_id]:
+            del self.digest_sends[key]
         jobs = [j for j, row in self.jobs.items() if row["user_email"] == email]
         for job_id in jobs:
             del self.jobs[job_id]
@@ -320,6 +333,100 @@ class FakeUserDB:
         for share_id in [k for k, r in self.shares.items()
                          if r["owner_user_id"] == owner_user_id]:
             del self.shares[share_id]
+
+    # ── Saved strategies + weekly digest (Day 10) ───────────────────
+    # Mirrors the PostgresDB methods, including the claim's conflict rule.
+
+    def _user(self, user_id: int) -> Dict[str, Any] | None:
+        return next((u for u in self._users.values() if u["id"] == user_id), None)
+
+    def count_strategies(self, user_id: int) -> int:
+        return sum(1 for r in self.strategies.values() if r["user_id"] == user_id)
+
+    def save_strategy(self, user_id, query, rules, symbols, saved_return_pct, saved_at=None):
+        import copy
+        from datetime import datetime, timezone
+
+        self._strategy_seq += 1
+        row = {
+            "id": self._strategy_seq, "user_id": user_id, "query": query,
+            "rules": copy.deepcopy(rules), "symbols": list(symbols),
+            "saved_return_pct": saved_return_pct,
+            "saved_at": saved_at or datetime.now(timezone.utc),
+        }
+        self.strategies[row["id"]] = row
+        return {k: v for k, v in row.items() if k != "user_id"}
+
+    def list_strategies(self, user_id: int) -> List[Dict[str, Any]]:
+        rows = [r for r in self.strategies.values() if r["user_id"] == user_id]
+        rows.sort(key=lambda r: (r["saved_at"], r["id"]), reverse=True)
+        return [{k: v for k, v in r.items() if k != "user_id"} for r in rows]
+
+    def delete_strategy(self, user_id: int, strategy_id: int) -> bool:
+        row = self.strategies.get(strategy_id)
+        if row and row["user_id"] == user_id:
+            del self.strategies[strategy_id]
+            return True
+        return False
+
+    def get_weekly_digest(self, user_id: int):
+        u = self._user(user_id)
+        return None if u is None else bool(u.get("weekly_digest", True))
+
+    def set_weekly_digest(self, user_id: int, enabled: bool) -> bool:
+        u = self._user(user_id)
+        if u is None:
+            return False
+        u["weekly_digest"] = bool(enabled)
+        return True
+
+    def digest_candidates(self, week_key: str, limit: int) -> List[Dict[str, Any]]:
+        from src.database import DIGEST_MAX_ATTEMPTS
+
+        out = []
+        for u in sorted(self._users.values(), key=lambda u: u["id"]):
+            if not (u.get("weekly_digest", True) and u["email_verified"]):
+                continue
+            if not self.count_strategies(u["id"]):
+                continue
+            row = self.digest_sends.get((u["id"], week_key))
+            if row and (row["status"] != "failed" or row["attempts"] >= DIGEST_MAX_ATTEMPTS):
+                continue
+            out.append({"id": u["id"], "email": u["email"]})
+        return out[:limit]
+
+    def claim_digest(self, user_id: int, week_key: str) -> bool:
+        from src.database import DIGEST_MAX_ATTEMPTS
+
+        row = self.digest_sends.get((user_id, week_key))
+        if row is None:
+            self.digest_sends[(user_id, week_key)] = {"status": "sending", "attempts": 1}
+            return True
+        if row["status"] == "failed" and row["attempts"] < DIGEST_MAX_ATTEMPTS:
+            row["status"], row["attempts"] = "sending", row["attempts"] + 1
+            return True
+        return False
+
+    def mark_digest(self, user_id: int, week_key: str, status: str) -> None:
+        row = self.digest_sends.get((user_id, week_key))
+        if row is not None:
+            row["status"] = status
+
+    def digest_lock(self):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _lock():
+            if self.lock_held:
+                yield False
+                return
+            self.lock_held = True
+            try:
+                yield True
+            finally:
+                self.lock_held = False
+
+        return _lock()
 
     def count_owner_backtests(self, owner: str) -> int:
         return sum(1 for r in self.jobs.values()

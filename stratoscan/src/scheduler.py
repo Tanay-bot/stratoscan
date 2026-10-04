@@ -299,6 +299,40 @@ class DataRefreshScheduler:
                 except Exception as e2:
                     logger.debug("[News Refresh] news pool close failed: %s", e2)
 
+    def job_send_digest(self) -> None:
+        """Daily pass of the weekly strategy digest (Day 10).
+
+        Each user gets at most one email per ISO week (``digest_sends`` is
+        the ledger), so running daily only means a provider outage today is
+        retried tomorrow. All guarantees (lock, cap, circuit breaker,
+        opt-out honoured mid-batch) live in ``src.digest.run_digest``; the
+        pass closes every pool it opened so Neon can suspend.
+        """
+        if not settings.digest_enabled:
+            logger.info("[Digest] Skipped — DIGEST_ENABLED=false")
+            return
+        if not settings.has_database_url:
+            logger.info("[Digest] Skipped — DATABASE_URL not set")
+            return
+        from src.digest import run_weekly_digest
+
+        with self._monitor.run("weekly_digest") as run:
+            try:
+                report = run_weekly_digest()
+                run.records = report.sent
+                run.details = report.summary()
+                if report.aborted:
+                    run.status = "failed"
+                    run.error = "stopped: email provider failing"
+                elif report.misconfigured:
+                    run.status = "failed"  # alerts the operator; never silent
+                    run.error = "not sent: SHARE_BASE_URL unset"
+                logger.info("[Digest] %s", report.summary())
+            except Exception as e:
+                run.status = "failed"
+                run.error = str(e)
+                logger.error("[Digest] Failed: %s", e)
+
     def job_warm_backtest_cache(self) -> None:
         """Warm the backtest history cache for the screener's top symbols.
 
@@ -368,6 +402,10 @@ class DataRefreshScheduler:
                 "Backtest cache warmer scheduled daily at %s",
                 settings.backtest_cache_warmer_time,
             )
+
+        if settings.digest_enabled:
+            schedule.every().day.at(settings.digest_time).do(self.job_send_digest)
+            logger.info("Weekly digest pass scheduled daily at %s", settings.digest_time)
 
         # Run initial refresh immediately
         logger.info("Running initial price refresh...")

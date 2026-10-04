@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   KeyRound,
   LogOut,
@@ -13,22 +13,20 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { fieldLabel } from '@/components/AuthShell'
-import { changePassword, deleteAccount, logoutEverywhere } from '@/lib/api/services'
+import {
+  changePassword,
+  deleteAccount,
+  getEmailPreferences,
+  logoutEverywhere,
+  setWeeklyDigest,
+} from '@/lib/api/services'
+import { toApiError } from '@/lib/api/client'
 import { Switch } from '@/components/ui/switch'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/store/auth'
 import { toast } from '@/store/notifications'
 import { DEMO_MODE } from '@/lib/api/client'
 import { fmtDate } from '@/lib/utils'
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-3.5">
-      <span className="text-sm text-text-mid">{label}</span>
-      {children}
-    </div>
-  )
-}
 
 function SecuritySection() {
   const { user, setSession, logout } = useAuth()
@@ -161,6 +159,87 @@ function SecuritySection() {
   )
 }
 
+/**
+ * Day 10: the one email this product sends on a schedule — the weekly update
+ * on saved strategies. The switch is server state (every digest run re-reads
+ * it right before sending), so turning it off takes effect at once.
+ */
+export function EmailSection() {
+  const [prefs, setPrefs] = useState<{ weekly_digest: boolean; email_verified: boolean } | null>(
+    null,
+  )
+  const [failed, setFailed] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const switchId = useId()
+  const ref = useRef<HTMLElement>(null)
+  const { hash } = useLocation()
+
+  useEffect(() => {
+    let live = true
+    getEmailPreferences()
+      .then((p) => live && setPrefs(p))
+      .catch(() => live && setFailed(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Links from the dashboard and the email land on #email.
+  useEffect(() => {
+    if (hash === '#email') ref.current?.scrollIntoView?.({ block: 'start' })
+  }, [hash, prefs])
+
+  const change = async (enabled: boolean) => {
+    if (!prefs) return
+    const before = prefs
+    setPrefs({ ...prefs, weekly_digest: enabled })
+    setSaving(true)
+    try {
+      await setWeeklyDigest(enabled)
+      toast.success(enabled ? 'Weekly updates on' : 'Weekly updates off')
+    } catch (err) {
+      setPrefs(before)
+      toast.error('Could not save', toApiError(err).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section
+      ref={ref}
+      id="email"
+      className="glass scroll-mt-24 rounded-2xl p-6"
+      aria-labelledby={`${switchId}-title`}
+    >
+      <h2 id={`${switchId}-title`} className="mb-2 flex items-center gap-2 text-base font-semibold">
+        <Mail className="h-4 w-4 text-grape-soft" aria-hidden="true" /> Email
+      </h2>
+      <div className="flex items-center justify-between gap-4 py-3.5">
+        <label htmlFor={switchId} className="text-sm text-text-mid">
+          Weekly update on my{' '}
+          <Link to="/app" className="text-neon hover:underline">
+            saved strategies
+          </Link>
+        </label>
+        <Switch
+          id={switchId}
+          checked={prefs?.weekly_digest ?? false}
+          disabled={!prefs || saving}
+          onCheckedChange={(v) => void change(v)}
+        />
+      </div>
+      <p className="text-xs text-text-low">
+        {failed
+          ? 'Couldn’t load your email settings. Reload the page to try again.'
+          : prefs && !prefs.email_verified
+            ? 'Verify your email address to receive it — we only send to confirmed addresses.'
+            : 'At most one email a week, only when you follow a strategy. It shows how each one has done since you saved it — losses included — next to SPY. Account emails like password resets always arrive.'}
+      </p>
+    </section>
+  )
+}
+
 function DeleteAccountSection() {
   const { logout } = useAuth()
   const navigate = useNavigate()
@@ -251,7 +330,6 @@ function DeleteAccountSection() {
 export function Settings() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [notifications, setNotifications] = useState({ news: true, weekly: false, product: true })
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -300,32 +378,7 @@ export function Settings() {
 
       {!DEMO_MODE && <SecuritySection />}
 
-      {/* Notifications */}
-      <section className="glass rounded-2xl p-6" aria-label="Notifications">
-        <h2 className="mb-2 flex items-center gap-2 text-base font-semibold">
-          <Mail className="h-4 w-4 text-grape-soft" aria-hidden="true" /> Notifications
-        </h2>
-        <div className="divide-y divide-white/[0.06]">
-          <Row label="Product updates">
-            <Switch
-              checked={notifications.product}
-              onCheckedChange={(v) => setNotifications((s) => ({ ...s, product: v }))}
-            />
-          </Row>
-          <Row label="News digests for your watchlist">
-            <Switch
-              checked={notifications.news}
-              onCheckedChange={(v) => setNotifications((s) => ({ ...s, news: v }))}
-            />
-          </Row>
-          <Row label="Weekly backtest recap">
-            <Switch
-              checked={notifications.weekly}
-              onCheckedChange={(v) => setNotifications((s) => ({ ...s, weekly: v }))}
-            />
-          </Row>
-        </div>
-      </section>
+      {!DEMO_MODE && <EmailSection />}
 
       {DEMO_MODE && (
         <section className="glass rounded-2xl border-neon/20 p-6" aria-label="Demo mode">

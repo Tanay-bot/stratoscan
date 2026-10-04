@@ -89,6 +89,12 @@ JOB_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "interval_seconds": 24 * 60 * 60,
         "stale_multiplier": 3,
     },
+    "weekly_digest": {
+        "label": "Weekly strategy digest (once per user per week)",
+        "schedule": f"daily at {settings.digest_time}",
+        "interval_seconds": 24 * 60 * 60,
+        "stale_multiplier": 3,
+    },
     "manual_refresh": {
         "label": "Manual refresh (POST /refresh)",
         "schedule": "on demand",

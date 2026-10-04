@@ -42,6 +42,7 @@ import { SplitPane } from '@/components/backtest/SplitPane'
 import { ChatPanel, type ChatMessage } from '@/components/backtest/ChatPanel'
 import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
+import { FollowButton } from '@/components/backtest/FollowButton'
 import { TrialBanner } from '@/components/backtest/TrialBanner'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
 import { RulesPanel, type RuleEdits } from '@/components/backtest/RulesPanel'
@@ -1105,6 +1106,15 @@ export function Backtest() {
                 >
                   <Link2Off className="h-3.5 w-3.5" aria-hidden="true" /> Stop sharing
                 </Button>
+              )}
+              {/* Day 10: follow this strategy — a weekly email on how it does. */}
+              {!DEMO_MODE && (
+                <FollowButton
+                  key={lastJobId ?? 'none'}
+                  jobId={lastJobId}
+                  signedIn={signedIn}
+                  disabled={!result || loading || result.total_symbols_tested === 0}
+                />
               )}
               {result && (
                 <Badge variant="neutral" className="text-[11px] normal-case">

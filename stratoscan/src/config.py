@@ -382,6 +382,17 @@ class Settings(BaseSettings):
     backtest_cache_warmer_delay: float = 0.2
     backtest_cache_warmer_time: str = "03:30"
 
+    # ── Weekly strategy digest (Day 10) ─────────────────────────────────
+    # A daily pass that emails each opted-in user (at most once per ISO
+    # week) what their saved strategies did since they saved them. Daily so
+    # a provider outage on one day is retried the next without double
+    # sending (digest_sends is the per-week ledger).
+    #   - digest_max_sends_per_run: hard cap per pass — the SendGrid free
+    #     tier is ~100/day and verification/reset mail shares it.
+    digest_enabled: bool = True
+    digest_time: str = "14:00"
+    digest_max_sends_per_run: int = 60
+
     # ── Background Job Monitoring ───────────────────────────────────────
     # Records every scheduler job run (status, duration, record counts,
     # errors) + a scheduler heartbeat so a silently-dead refresh is never
@@ -680,6 +691,15 @@ def validate_config() -> List[str]:
             "JOB_MONITOR_ENABLED=true but DATABASE_URL is missing — job "
             "history/heartbeat will be in-memory only (lost on restart). "
             "Set DATABASE_URL for persistent background-job monitoring."
+        )
+
+    if settings.digest_enabled and not (settings.share_base_url or "").strip():
+        # The digest's unsubscribe link is an API route; the scheduler has no
+        # request origin to fall back on, so it refuses to send without one.
+        warnings.append(
+            "DIGEST_ENABLED=true but SHARE_BASE_URL is unset — the weekly "
+            "strategy email will not send (its unsubscribe link must point at "
+            "the API's public origin). Set SHARE_BASE_URL or DIGEST_ENABLED=false."
         )
 
     # Every env var the app reads must be documented in the template.

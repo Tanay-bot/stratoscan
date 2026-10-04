@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import {
   ArrowRight,
   BarChart3,
+  BellRing,
   Bookmark,
   Clock,
   LineChart,
@@ -18,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
+import { SavedStrategies } from '@/components/dashboard/SavedStrategies'
 import { SharedLinks } from '@/components/dashboard/SharedLinks'
 import { TEMPLATES } from '@/lib/templates'
 import { Sparkline } from '@/components/charts/Sparkline'
@@ -397,6 +399,27 @@ export function Dashboard() {
           )}
         </Widget>
       </motion.div>
+
+      {/* Day 10: strategies this account follows — each emailed weekly. */}
+      {!DEMO_MODE && (
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.21 }}
+        >
+          <Widget
+            title="Saved strategies"
+            icon={BellRing}
+            action={
+              <Link to="/app/settings#email" className="text-xs text-text-mid hover:text-neon">
+                Email settings
+              </Link>
+            }
+          >
+            <SavedStrategies />
+          </Widget>
+        </motion.div>
+      )}
 
       {/* Day 6/8: what this account has made public, and the off switch. */}
       {!DEMO_MODE && (

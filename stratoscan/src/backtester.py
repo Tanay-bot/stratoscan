@@ -2251,6 +2251,61 @@ class BacktestEngine:
                         pass  # progress is advisory — never break the backtest
         return results
 
+    def load_prices(
+        self, symbol: str, start_date: str, end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """Daily OHLCV for ``symbol`` from ``start_date``: the backtest cache
+        first, yfinance on a miss or an under-covering cache (stored for next
+        time). Shared by the backtest path and the weekly digest (Day 10), so
+        both read prices exactly the same way. Returns None when unavailable.
+        """
+        # Fetch data if not already cached in the backtest DB.
+        # Coverage check: the cache may have been populated by a
+        # DEFAULT-window run (fetch starts today−10y), so a later
+        # request whose start_date is EARLIER than the cache's first
+        # bar is silently truncated — the sim ran a shorter window
+        # than the API reported (verified live: start 2016-01-01
+        # produced a curve beginning 2016-08-03). Treat the cache
+        # as a miss and refetch with the explicit start when its
+        # first bar is more than a few days after the requested
+        # start (tolerance = first trading day after a holiday).
+        existing = self._db.get_historical_prices(
+            symbol, start_date, end_date
+        )
+
+        df = None
+        if existing:
+            # Convert stored rows back to a DataFrame (dict-able rows
+            # from SQLite or the BacktestDB RealDictCursor)
+            rows = [dict(row) for row in existing]
+            df = pd.DataFrame(rows)
+            df.set_index("date", inplace=True)
+            df.index = pd.to_datetime(df.index)
+            df.rename(columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume",
+            }, inplace=True)
+            first_bar = df.index.min()
+            if pd.notna(first_bar):
+                requested_start = pd.Timestamp(start_date)
+                if (first_bar - requested_start).days > 7:
+                    logger.info(
+                        "Cache for %s starts %s — requested window "
+                        "starts %s; refetching for full coverage",
+                        symbol, first_bar.date(), start_date,
+                    )
+                    df = None
+
+        if df is None:
+            # Fetch from Yahoo Finance (honors the requested start).
+            df = fetch_historical_data(symbol, start_date=start_date)
+            if df is not None:
+                store_historical_data(self._db, symbol, df)
+        return df
+
     def _backtest_one(
         self,
         interpreted: InterpretedQuery,
@@ -2272,51 +2327,7 @@ class BacktestEngine:
         connection (both in src/database.py).
         """
         try:
-            # Fetch data if not already cached in the backtest DB.
-            # Coverage check: the cache may have been populated by a
-            # DEFAULT-window run (fetch starts today−10y), so a later
-            # request whose start_date is EARLIER than the cache's first
-            # bar is silently truncated — the sim ran a shorter window
-            # than the API reported (verified live: start 2016-01-01
-            # produced a curve beginning 2016-08-03). Treat the cache
-            # as a miss and refetch with the explicit start when its
-            # first bar is more than a few days after the requested
-            # start (tolerance = first trading day after a holiday).
-            existing = self._db.get_historical_prices(
-                symbol, start_date, end_date
-            )
-
-            df = None
-            if existing:
-                # Convert stored rows back to a DataFrame (dict-able rows
-                # from SQLite or the BacktestDB RealDictCursor)
-                rows = [dict(row) for row in existing]
-                df = pd.DataFrame(rows)
-                df.set_index("date", inplace=True)
-                df.index = pd.to_datetime(df.index)
-                df.rename(columns={
-                    "open": "Open",
-                    "high": "High",
-                    "low": "Low",
-                    "close": "Close",
-                    "volume": "Volume",
-                }, inplace=True)
-                first_bar = df.index.min()
-                if pd.notna(first_bar):
-                    requested_start = pd.Timestamp(start_date)
-                    if (first_bar - requested_start).days > 7:
-                        logger.info(
-                            "Cache for %s starts %s — requested window "
-                            "starts %s; refetching for full coverage",
-                            symbol, first_bar.date(), start_date,
-                        )
-                        df = None
-
-            if df is None:
-                # Fetch from Yahoo Finance (honors the requested start).
-                df = fetch_historical_data(symbol, start_date=start_date)
-                if df is not None:
-                    store_historical_data(self._db, symbol, df)
+            df = self.load_prices(symbol, start_date, end_date)
 
             if df is None:
                 logger.warning("No data available for %s, skipping", symbol)

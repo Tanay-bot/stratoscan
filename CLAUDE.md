@@ -179,6 +179,7 @@ stratoscan/                          # Backend (Python)
 │   ├── share_page.py        # Day 6: public share summary (field whitelist) + server-rendered page
 │   ├── share_card.py        # Day 7: 1200×630 PNG preview card (Pillow + assets/fonts, cached by content hash)
 │   ├── strategy_templates.py # Day 8: the 15-template library (served in /meta; mirrored in frontend/src/lib/templates.ts)
+│   ├── digest.py            # Day 10: weekly saved-strategy email (light re-run, honest copy, send guarantees)
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -312,6 +313,10 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/auth/login` | — | JWT; timing-equalized; unverified blocked if `EMAIL_VERIFICATION_REQUIRED` |
 | GET | `/auth/me` | Bearer | current user |
 | GET/PUT | `/me/personal` | Bearer | per-user watchlist/screeners/backtests (JSONB) |
+| GET/POST | `/me/strategies` | Bearer | Day 10: list / follow a finished job (rules + symbols from the server's stored result; cap 20) |
+| DELETE | `/me/strategies/{strategy_id}` | Bearer | stop following (owner-scoped WHERE) |
+| GET/PUT | `/me/email-preferences` | Bearer | `weekly_digest` on/off (+ `email_verified`) |
+| GET/POST | `/email/unsubscribe` | signed `unsub` token qs | GET = confirm page only (scanners prefetch); POST = off at once (RFC 8058 one-click) |
 | GET | `/auth/verify-email` | token qs | flips `email_verified` |
 | POST | `/auth/verify-email` | body token | same via JSON body |
 | POST | `/auth/resend-verification` | Bearer | re-send email |
@@ -650,7 +655,7 @@ Output is deterministic, so `api._SHARE_CARD_CACHE` keys it by `card_key(summary
 
 ### `src/strategy_templates.py` — the template library (Day 8)
 
-`TEMPLATES` (12) with `id, title, query, idea, category, buy_rules, sell_rules`; `simulates(t)`
+`TEMPLATES` (15) with `id, title, query, idea, category, buy_rules, sell_rules`; `simulates(t)`
 renders the pinned rules as a sentence; `templates_payload()` feeds `GET /meta`. Three rules,
 enforced by `tests/test_strategy_templates.py`: each query parses deterministically (≥ 0.6, so
 **0 LLM calls**), the engine trades exactly the pinned rules (no screen-only ideas), and it does
@@ -658,6 +663,24 @@ not churn (median hold ≥ 10 trading days on synthetic up/choppy/down markets).
 screens must be restricted to large caps or a sector (technicals are refreshed for the top 500
 only). The frontend copy (`frontend/src/lib/templates.ts`) is checked id-for-id and
 query-for-query. Live check: `python verify_templates.py` (real prices + a full DB).
+
+### `src/digest.py` — the weekly saved-strategy email (Day 10)
+
+`evaluate_strategy(saved, load_prices=, screen_now=, today=)` re-runs a saved strategy's stored
+rules (no LLM) on ≤5 of its symbols with `run_backtest(..., signal_start_date=saved_at)` and
+420 days of warm-up, so only the days since saving count; equal-weight return vs SPY over the
+same days, plus which symbols still / no longer / newly screen in. Never raises: statuses
+`ok` / `too_early` (< 5 days) / `no_data` / `error`. `compose_email` writes text + HTML that
+say "down" when it is down. `run_digest(store, send=, evaluate=, …)` holds the guarantees:
+a Postgres advisory lock (`digest_lock`, own short connection), at most one email per user per
+ISO week (`digest_sends` ledger; **claim before send** — a `'sending'` row is never retried,
+`'failed'` is retried ≤ `DIGEST_MAX_ATTEMPTS` 3), the opt-out re-read right before each send,
+a circuit breaker after 3 consecutive send failures, a per-run cap
+(`DIGEST_MAX_SENDS_PER_RUN`), per-user exception isolation, and `List-Unsubscribe` headers.
+`run_weekly_digest()` wires it to Postgres/engine/SendGrid and **refuses to send without
+`SHARE_BASE_URL`** (the unsubscribe link is an API route). CLI: `python -m src.main digest
+[--dry-run] [--user EMAIL]`. Tests: `tests/test_weekly_digest.py` (fake transport + failure
+drills).
 
 ### `src/backfill.py` & `src/cache_warmer.py`
 
@@ -691,6 +714,8 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 | `user_data` | `user_id` PK FK users ON DELETE CASCADE, `watchlist` JSONB, `saved_screeners` JSONB, `recent_backtests` JSONB, `updated_at` | Per-user saved state synced from frontend. |
 | `events` | `id`, `name`, `occurred_at` TIMESTAMPTZ, `anon_id`, `user_id` FK users ON DELETE SET NULL, `props` JSONB | The product funnel (Day 4). Written ONLY by `src/analytics.track()`; the per-event prop whitelist lives in `EVENTS` there — no query text, email, symbol list or exception message is ever stored. `user_id` is SET NULL on account deletion, so deleting an account anonymises its events instead of deleting history. |
 | `shared_results` | `share_id` PK (128-bit random), `job_id`, `owner_user_id` FK users ON DELETE CASCADE, `owner_anon`, `query`, `summary` JSONB, `created_at` | Day 6 public share links. `summary` is built by `share_page.build_share_summary` (a field whitelist — never the raw result). Revoke = DELETE. Purged with the account and by a Google takeover of a squatted row. |
+| `saved_strategies` | `id`, `user_id` FK users ON DELETE CASCADE, `query`, `rules` JSONB (`buy_rules`/`sell_rules` the engine ran), `symbols` JSONB, `saved_return_pct`, `saved_at` | Day 10. Written only from the owner's own finished job (never client numbers). ≤ 20 per user. |
+| `digest_sends` | (`user_id` FK CASCADE, `week_key` e.g. `2026-W40`) PK, `status` ('sending'/'sent'/'failed'), `attempts`, `updated_at` | The once-a-week ledger. `users.weekly_digest` (BOOLEAN, default TRUE) is the opt-out. |
 | `error_log` | `id`, `occurred_at` TIMESTAMPTZ, `method`, `route` (template), `error_type`, `trace` | One row per unhandled exception, written by `generic_exception_handler`. `route` is the route TEMPLATE, never the raw URL (which can carry a token); `trace` is scrubbed by `analytics.scrub()` (emails → `<email>`, JWTs → `<jwt>`, `Bearer …` → `Bearer <redacted>`, capped at 8,000 chars). No bodies, no headers. |
 
 ### Backtest DB (`BACKTEST_DATABASE_URL`) — also exists as SQLite (`data/backtest_history.db`) in dev
@@ -805,6 +830,7 @@ LLM outage) → close news pool.
 | `fundamental_refresh` | daily 02:00 | profiles: sector, market cap, PE, beta… |
 | `news_refresh` | every `NEWS_REFRESH_MINUTES` (default 120) | top-150 by market cap, news + LLM sentiment |
 | `backtest_cache_warm` | daily `BACKTEST_CACHE_WARMER_TIME` (03:30) | pre-fetch 10y OHLCV for top-100 |
+| `weekly_digest` | daily `DIGEST_TIME` (14:00) when `DIGEST_ENABLED` | saved-strategy email; ≤1 per user per ISO week, so daily = tomorrow retries today's outage |
 
 Each run is recorded via `JobMonitor.run(...)` → `job_runs` table. After each cycle the DB
 pools are **closed** so Neon can auto-suspend (~50h/month compute, inside the free tier).
@@ -981,12 +1007,12 @@ All keys in `stratoscan/.env` (gitignored, chmod 600). Full annotated template:
 | Finnhub | `FINNHUB_KEY_01..10`, `NEWS_FINNHUB_KEY`, `FINNHUB_REQUEST_TIMEOUT` | round-robin pool |
 | LLM | `SCREENER_LLM_KEY`, `BACKTEST_LLM_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_PROVIDERS`, `LLM_PROVIDER_TIMEOUT`, per-provider `<NAME>_BASE_URL/_MODEL/_KEYS/_TIMEOUT` (ZAI/GEMINI/GROQ/ZENMUX) | `LLM_PROVIDERS` priority list; free flash models |
 | Auth | `JWT_SECRET`, `JWT_EXPIRE_HOURS`, `PASSWORD_MIN_LENGTH` | `openssl rand -hex 32` |
-| Email / links | `SENDGRID_API_KEY`, `EMAIL_FROM_ADDRESS`, `APP_BASE_URL`, `SHARE_BASE_URL` (public API origin for `/r/{id}` links; request origin when unset), `EMAIL_VERIFICATION_REQUIRED`, `EMAIL_VERIFICATION_TOKEN_TTL_HOURS` | sender must be verified in SendGrid |
+| Email / links | `SENDGRID_API_KEY`, `EMAIL_FROM_ADDRESS`, `APP_BASE_URL`, `SHARE_BASE_URL` (public API origin for `/r/{id}` links — request origin when unset — and for digest unsubscribe links, where unset = **no digest is sent**), `EMAIL_VERIFICATION_REQUIRED`, `EMAIL_VERIFICATION_TOKEN_TTL_HOURS` | sender must be verified in SendGrid |
 | Admin | `ADMIN_EMAILS` | auto-promoted at register/login |
 | Rate limits | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_BYPASS_IPS`, `REDIS_RATE_LIMIT_ENABLED`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_RATE_LIMIT_TIMEOUT` | read bucket env-configurable; cost shields fixed |
 | Caching | `CACHE_ENABLED`, `INTERPRET_CACHE_TTL`, `INTERPRET_CACHE_MAX_ENTRIES`, `SCREEN_CACHE_TTL`, `SCREEN_CACHE_MAX_ENTRIES` | |
 | CORS | `CORS_ALLOW_ORIGINS` | comma-separated; locked down (no wildcard) |
-| Scheduler/monitor | `JOB_MONITOR_ENABLED`, `JOB_HEARTBEAT_PERSIST_MINUTES`, `BACKTEST_CACHE_WARMER_*`, `NEWS_SYMBOLS_LIMIT`, `NEWS_REFRESH_MINUTES`, `NEWS_LLM_PREFER` | |
+| Scheduler/monitor | `JOB_MONITOR_ENABLED`, `JOB_HEARTBEAT_PERSIST_MINUTES`, `BACKTEST_CACHE_WARMER_*`, `NEWS_SYMBOLS_LIMIT`, `NEWS_REFRESH_MINUTES`, `NEWS_LLM_PREFER`, `DIGEST_ENABLED`, `DIGEST_TIME`, `DIGEST_MAX_SENDS_PER_RUN` (60 — SendGrid's free ~100/day is shared with verification/reset mail) | |
 | Alerting | `ALERT_WEBHOOK_URL`, `ALERT_EMAIL`, `ALERT_WEBHOOK_MIN_INTERVAL_SECONDS` | at least one channel or alerts are no-op |
 | Ops | `APP_ENV` (production disables docs), `LOG_LEVEL`, `LOG_FORMAT`, `METRICS_ENABLED`, `DB_CONNECT_TIMEOUT`, `YFINANCE_TIMEOUT`, `USE_DETERMINISTIC_INTERPRETER` | |
 
@@ -1174,6 +1200,9 @@ portable mirror and pinned in sync by `npm run verify:headers`.
   (plus stop/target) are applied in `_run_backtest_pipeline` and echoed in `strategy`; the
   frontend sends only what the user set. Don't reintroduce text appended to `query` — the
   parser ignores it and it shows up on share pages.
+- **Never let a digest go out with a dead unsubscribe link** — `run_weekly_digest` refuses
+  without `SHARE_BASE_URL`; GET on `/email/unsubscribe` must stay side-effect free (scanners).
+  A `'sending'` ledger row is never retried: a missed email beats a duplicate.
 - **Scheduler cadence constants live in TWO places** — `scheduler.py` and
   `job_monitor.JOB_DEFINITIONS` — keep in sync when retuning.
 - **Docs disabled in production** — verify with `APP_ENV=production`.
@@ -1191,6 +1220,16 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 ## 19. Recent significant changes
 
 These shaped current behavior — don't "clean up" them without understanding why:
+
+- **Day 10 — saved strategies + the weekly email:** "Follow weekly" on a finished backtest
+  (`components/backtest/FollowButton.tsx`) saves it via `POST /me/strategies` with only the
+  job id; the Dashboard's "Saved strategies" panel lists / re-runs / unfollows; Settings → Email
+  (`#email`) is the one real switch (the old Notifications toggles were local state that sent
+  nothing — removed). `src/digest.py` + `digest_sends` + `saved_strategies` (migration
+  `b6c7d8e9f0a1`); see §6 for the send guarantees. `get_current_user` now refuses **any** token
+  with a `typ` claim (account tokens have none; `anon` and `unsub` do). `send_email(...,
+  headers=)` carries `List-Unsubscribe` (CR/LF headers dropped). `BacktestEngine.load_prices`
+  is the cache-then-yfinance loader, extracted from `_backtest_one` for the digest's re-run.
 
 - **Day 8 — templates + honest empty states:** 12 templates (`src/strategy_templates.py`), a
   public `/strategies` page, template pickers in the Backtest empty and zero-match states,

@@ -244,6 +244,25 @@ def cmd_scheduler(args: argparse.Namespace) -> None:
     scheduler.start()
 
 
+def cmd_digest(args: argparse.Namespace) -> None:
+    """Run the weekly strategy digest once (Day 10).
+
+    Usage:
+        python -m src.main digest --dry-run          # print, send nothing
+        python -m src.main digest --user you@x.com   # just one person
+        python -m src.main digest                    # the real pass
+
+    The same pass the scheduler runs daily: at most one email per user per
+    ISO week (a second run this week skips anyone already sent).
+    """
+    from src.digest import run_weekly_digest
+
+    report = run_weekly_digest(dry_run=args.dry_run, only_email=args.user)
+    for p in report.previews:
+        print(f"\n── To: {p['to']}\nSubject: {p['subject']}\n\n{p['text']}\n")
+    print(f"📬 Digest: {report.summary()}")
+
+
 def cmd_backfill_history(args: argparse.Namespace) -> None:
     """Bulk-load historical OHLCV into the Neon backtest DB (Tier 3).
 
@@ -491,6 +510,16 @@ def create_parser() -> argparse.ArgumentParser:
         help="Max symbols to warm (default: BACKTEST_CACHE_WARMER_LIMIT from .env)",
     )
 
+    # digest (Day 10: weekly strategy email)
+    digest_parser = subparsers.add_parser(
+        "digest",
+        help="Run the weekly saved-strategy digest once",
+        description="Email each opted-in user what their saved strategies did since saving (once per ISO week).",
+    )
+    digest_parser.add_argument("--dry-run", action="store_true",
+                               help="Compose and print the emails; send nothing, record nothing")
+    digest_parser.add_argument("--user", default=None, help="Only this account's email")
+
     # backfill-history (Tier 3: Neon bulk load)
     backfill_parser = subparsers.add_parser(
         "backfill-history",
@@ -609,6 +638,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "setup": cmd_setup,
         "scheduler": cmd_scheduler,
         "warm-cache": cmd_warm_cache,
+        "digest": cmd_digest,
         "backfill-history": cmd_backfill_history,
         "enrich": cmd_enrich,
         "serve": cmd_serve,

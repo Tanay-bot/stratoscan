@@ -30,10 +30,12 @@ import type {
   BacktestJobStatus,
   BacktestRequest,
   BacktestResponse,
+  EmailPreferences,
   LoginRequest,
   NewsArticle,
   NewsFeedResponse,
   RegisterRequest,
+  SavedStrategy,
   ScreenRequest,
   ScreenResponse,
   SentimentSummary,
@@ -287,6 +289,38 @@ export async function backtestJobStatus(jobId: string): Promise<BacktestJobStatu
     )
   }
   return unwrap<BacktestJobStatus>(api.get(`/backtest/async/${encodeURIComponent(jobId)}`))
+}
+
+// ── Saved strategies + the weekly email (Day 10) ───────────────────────────
+// Following sends only a job id: the server saves the rules and symbols from
+// its own stored result, so what is emailed is what was actually run.
+
+/** Follow a finished backtest: it is re-run and emailed to you weekly. */
+export async function saveStrategy(jobId: string): Promise<SavedStrategy> {
+  const res = await unwrap<{ strategy: SavedStrategy }>(
+    api.post('/me/strategies', { job_id: jobId }),
+  )
+  return res.strategy
+}
+
+/** The strategies this account follows, newest first. */
+export async function listStrategies(): Promise<SavedStrategy[]> {
+  const res = await unwrap<{ strategies: SavedStrategy[] }>(api.get('/me/strategies'))
+  return res.strategies
+}
+
+/** Stop following a strategy (and stop emailing about it). */
+export async function deleteStrategy(id: number): Promise<void> {
+  await api.delete(`/me/strategies/${encodeURIComponent(String(id))}`)
+}
+
+export async function getEmailPreferences(): Promise<EmailPreferences> {
+  return unwrap<EmailPreferences>(api.get('/me/email-preferences'))
+}
+
+/** Takes effect at once — a digest run already in progress re-reads it. */
+export async function setWeeklyDigest(enabled: boolean): Promise<void> {
+  await api.put('/me/email-preferences', { weekly_digest: enabled })
 }
 
 // ── Public share links (Day 6: shareable proof) ────────────────────────────

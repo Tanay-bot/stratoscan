@@ -255,6 +255,9 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
 | `NEWS_REFRESH_MINUTES` | — | news job interval (drives its staleness threshold) |
 | `BACKTEST_CACHE_WARMER_ENABLED` | true | cache-warmer master switch |
 | `BACKTEST_CACHE_WARMER_TIME` | 03:30 | daily cache-warm time |
+| `DIGEST_ENABLED` | true | weekly saved-strategy email (job `weekly_digest`); needs `SHARE_BASE_URL` or the run is recorded `failed` and sends nothing |
+| `DIGEST_TIME` | 14:00 | daily pass time; each user still gets ≤ 1 email per ISO week |
+| `DIGEST_MAX_SENDS_PER_RUN` | 60 | per-pass cap (SendGrid free tier ~100/day is shared with account mail) |
 
 ---
 
