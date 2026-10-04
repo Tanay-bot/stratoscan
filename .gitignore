@@ -13,3 +13,6 @@
 # ── Logs ───────────────────────────────────────────────────────────────
 *.log
 *.port
+
+# /court skill trial transcripts (local only)
+.court/
