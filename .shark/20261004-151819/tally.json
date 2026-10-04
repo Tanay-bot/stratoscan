@@ -1,0 +1,59 @@
+{
+  "in": 0,
+  "out": 5,
+  "panel": 5,
+  "investors": [
+    {
+      "investor": "The Tech Billionaire Shark",
+      "decision": "OUT",
+      "offer": "none",
+      "reason": "I asked who pays, who uses it and who covers the data bill, and all I got was zero users, zero revenue, a payment system you ripped out and a scraped Yahoo feed, so tell me, is this a business or a hobby, because right now it's a very well-tested hobby. For that reason, I'm out.",
+      "change": "Twenty real users outside your circle who ran a second backtest, plus at least five who said in writing what they would pay for it and how much."
+    },
+    {
+      "investor": "The Royalty Shark",
+      "decision": "OUT",
+      "offer": "none",
+      "reason": "I want a piece of every sale, and you've promised \"free, forever,\" ripped out the payment system, and couldn't tell me what anyone would ever pay for or when the first dollar lands, so my royalty would be a percentage of zero. For that reason, I'm out.",
+      "change": "A priced paid offer, live and taking money, with real customers paying for it, plus a line-by-line monthly bill at 10,000 users showing that revenue covers it."
+    },
+    {
+      "investor": "The Customer Shark",
+      "decision": "OUT",
+      "offer": "none",
+      "reason": "I'm the customer, so would I actually buy this? You can't tell me who I am, what I'd cancel to make room for you, or how I get a result before I close the tab, and nobody but you has ever run one, so I have nothing to want. For that reason, I'm out.",
+      "change": "Ten strangers who already use Finviz or TradingView, each getting a first backtest in under 60 seconds on a deployed link, and at least half of them coming back to run a second one."
+    },
+    {
+      "investor": "The Numbers Shark",
+      "decision": "OUT",
+      "offer": "none",
+      "reason": "Show me the numbers? You can't: zero price, zero revenue, zero users, no bill at 10,000 users, no ask, and you ripped out the only thing that could ever charge a dollar, so there is nothing here I can put a payback date on. For that reason, I'm out.",
+      "change": "A one-page model with a real price, a line-by-line monthly cost at 10,000 users, and launched-user data showing what share run a second backtest and what share would pay that price."
+    },
+    {
+      "investor": "The Skeptic Shark",
+      "decision": "OUT",
+      "offer": "none",
+      "reason": "I've seen this movie before: your whole pitch is \"every number is correct,\" but those numbers come from an unofficial Yahoo scraper you don't control, your only backup is untested and legally can't show prices, and you couldn't name a single person who wants this over the free screeners they already use. For that reason, I'm out.",
+      "change": "A signed, tested licensed data source that allows showing prices to users, with its monthly cost at 10,000 users, plus recorded interviews with real investors who say they'd switch from Finviz or TradingView to this."
+    }
+  ],
+  "homework": [
+    "the founder needs to find out who would pay, for what, and whether this is a business or a hobby.",
+    "the founder needs to find out the specific target user and why they would switch.",
+    "the founder needs to find out the data cost at 10,000 users and who pays it.",
+    "the founder needs to find out what anyone would pay for and when the first dollar could arrive.",
+    "the founder needs to find out what the product offers without a displayable data source.",
+    "the founder needs to find out the monthly cost at 10,000 users and who pays.",
+    "the founder needs to find out who the target user is and how Stratoscan compares with Finviz and TradingView.",
+    "the founder needs to find out how the speed target will be hit and a specific date.",
+    "the founder needs to find out what a user sees when yfinance breaks. The backup cannot show prices.",
+    "the founder needs to find out a price, when charging would start, and why anyone would pay given \"free, forever.\"",
+    "the founder needs to find out a line-by-line monthly bill at 10,000 users and who pays.",
+    "the founder needs to find out the target percentage, the deadline, the trigger for charging, and how much investment is being asked for and for what.",
+    "the founder needs to find out a workable plan for the day yfinance stops, including a licensed source that permits display and its cost.",
+    "the founder needs to find out who funds paid Finnhub, email and other tiers once usage exceeds free limits.",
+    "the founder needs to find out through user interviews whether anyone prefers this to free screeners."
+  ]
+}
