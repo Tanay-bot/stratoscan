@@ -1,7 +1,8 @@
 # Stratoscan — Claude Code Companion
 
-> **Bridge from idea to candidate list.** A natural-language market terminal with 10 years of
-> backtested history — free, forever.
+> **Has your investing idea ever worked?** Describe it in plain English; Stratoscan turns it into
+> rules and replays them over 10 years of daily prices. It doesn't tell you what to buy — it shows
+> you whether what you already believe has ever been true (Day 14 positioning).
 >
 > This file is the single source of truth for working in this repository. It is deliberately
 > long: read the section you need, not the whole thing.
@@ -197,7 +198,7 @@ stratoscan/                          # Backend (Python)
 ├── load_test.py             # Day 13: concurrency ramp on /screen + /backtest/async (→ LOAD.md)
 ├── accuracy_loop.py         # 30-query accuracy verification loop
 ├── rule_execution_loop.py   # Rule-execution ground-truth tests
-├── alembic/                 # Migrations (10 versions)
+├── alembic/                 # Migrations (19 versions)
 ├── Dockerfile, docker-entrypoint.sh
 ├── fly.toml, fly.staging.toml
 ├── .env.example, staging.env(.example)
@@ -667,6 +668,21 @@ incl. bidi overrides, drops glyphs the font lacks) and BASIC layout (no libraqm 
 Output is deterministic, so `api._SHARE_CARD_CACHE` keys it by `card_key(summary)` (bump
 `CARD_VERSION` when the layout changes); the DB lookup runs first, so a revoked link 404s.
 
+### `src/etfs.py` — the curated ETF set (Day 14)
+
+`ETFS` (45 plain-vanilla funds: broad market, sector SPDRs + SMH/XBI/KRE, style/factor,
+international, bonds, real assets — **no leveraged or inverse funds**, which reset daily and
+make multi-day backtests measure decay), `ETF_SYMBOLS`, `etf_seed_records()`, `with_etfs()`.
+Rows carry `asset_type='etf'`, sector funds use the canonical sector names, `industry` is the
+category. `PostgresDB.seed_etfs()` inserts them (from `init_schema` and `setup`) with
+`updated_at` at the epoch, so they stay out of screens until the price refresh quotes them;
+quotes + technicals cover them (the scheduler appends them), fundamentals do not. Screens are
+**stocks only** unless the query asks for funds (`InterpretedQuery.asset_type == "etf"`, set by
+`deterministic_interpreter.ETF_PATTERN` or the LLM's exact `"asset_type": "etf"`); an ETF screen
+needs a price but no market cap and sorts by `avg_volume` instead of market cap
+(`data_quality.sort_note`). Every result carries `asset_type`; the UI labels funds
+(`components/EtfBadge.tsx`). Tests: `tests/test_etfs.py`.
+
 ### `src/strategy_templates.py` — the template library (Day 8)
 
 `TEMPLATES` (15) with `id, title, query, idea, category, buy_rules, sell_rules`; `simulates(t)`
@@ -757,7 +773,7 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `stock_master` | `symbol` PK, `company_name`, `sector`, `industry`, `market_cap`, `current_price`, `price_change_pct`, `volume`, `avg_volume`, `pe_ratio`, `eps_ttm`, `dividend_yield`, `beta`, `rsi_14`, `sma_50`, `sma_200`, `high_52w`, `low_52w`, `ps_ratio`, `pb_ratio`, `ev_ebitda`, `roe_ttm`, `roa_ttm`, `gross_margin_ttm`, `net_margin_ttm`, `revenue_growth_ttm`, `eps_growth_ttm`, `macd_12_26`, `atr_14`, `bollinger_upper/lower`, `updated_at` | The screener universe (~5,000 US, exchange-listed). NULL = no data; filters on those columns exclude rows without the field. `updated_at` drives staleness. 10 indexes on filter columns. |
+| `stock_master` | `symbol` PK, `company_name`, `sector`, `industry`, `market_cap`, `current_price`, `price_change_pct`, `volume`, `avg_volume`, `pe_ratio`, `eps_ttm`, `dividend_yield`, `beta`, `rsi_14`, `sma_50`, `sma_200`, `high_52w`, `low_52w`, `ps_ratio`, `pb_ratio`, `ev_ebitda`, `roe_ttm`, `roa_ttm`, `gross_margin_ttm`, `net_margin_ttm`, `revenue_growth_ttm`, `eps_growth_ttm`, `macd_12_26`, `atr_14`, `bollinger_upper/lower`, `asset_type` ('stock'/'etf'), `updated_at` | The screener universe (~5,000 US, exchange-listed stocks + the curated ETF set from `src/etfs.py`). NULL = no data; filters on those columns exclude rows without the field. `updated_at` drives staleness. 10 indexes on filter columns. |
 | `users` | `id` PK, `email` UNIQUE, `password_hash`, `plan` ('free'/'pro'; 'premium' = old name of pro), `plan_pending` / `plan_change_at` / `plan_change_reason` (a period-end downgrade or a grace-period revocation), `grandfathered_pro`, `email_verified`, `verification_token`, `verification_token_expires`, `is_admin`, `weekly_digest`, `created_at` | PBKDF2 hashes only. The plan in force is `entitlements.plan_for(row)`, never the raw column. |
 | `usage_counters` | (`user_id` FK CASCADE, `period` 'YYYY-MM', `kind`) PK, `count` | Day 12 metered usage (backtests). Charged atomically (`consume_usage`: `… WHERE count < limit`). |
 | `app_counters` | `name` PK, `value` | Counters that never go backwards; `grandfathered_pro` = slots issued (≤ 100). |
@@ -788,9 +804,11 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 
 ### Migrations
 
-Alembic under `stratoscan/alembic/` (10 versions: users, stock_master, news tables, admin
+Alembic under `stratoscan/alembic/` (19 versions: users, stock_master, news tables, admin
 role, email verification columns, user_data, job monitor tables, screener quality columns,
-stripe add/drop). `docker-entrypoint.sh` runs `alembic upgrade head` (retried ×5 for cold
+stripe add/drop, then the Day 3–14 additions — token version, password reset, Google sub,
+events/error_log, shared_results, saved strategies + digest, explanations, entitlements,
+`asset_type`). `docker-entrypoint.sh` runs `alembic upgrade head` (retried ×5 for cold
 Neon) before uvicorn. `python -m src.main setup` runs the same + backtest/news schemas.
 `init_schema()` self-heals on API startup as a belt-and-suspenders measure.
 
@@ -989,7 +1007,8 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
 ### Routing (`App.tsx`)
 
 Public: `/`, `/how-it-works`, `/features`, `/about`, `/pricing`, `/contact`, `/terms`,
-`/privacy`, `/login`, `/signup`, `/verify-email`, `/404`.
+`/privacy`, `/risk`, `/verification` (Day 14), `/strategies`, `/try`, `/login`, `/signup`,
+`/verify-email`, `/404`.
 Protected (`ProtectedRoute` + `AppShell`): `/app` (Dashboard), `/app/screener`,
 `/app/backtest`, `/app/stocks/:symbol`, `/app/news`, `/app/settings`.
 All pages are lazy-loaded (route-level code splitting). Global: `SkipToContent`, `Seo`,
@@ -1100,7 +1119,10 @@ for t in tests/test_*.py; do python -m "tests.$(basename "$t" .py)" || echo "FAI
 pytest                               # also works (pytest config in pyproject.toml)
 ```
 
-Key suites: `test_auth`, `test_admin`, `test_rate_limits`, `test_scheduler`,
+Key suites: `test_public_claims` (Day 14 — public copy vs code: bans removed claims, checks
+Monte Carlo / walk-forward / fees / free allowance / ETF count / the split example / the accuracy
+line / the drill count), `test_corporate_actions` (the 2-for-1 split worked example),
+`test_etfs`, `test_volume_backfill`, `test_auth`, `test_admin`, `test_rate_limits`, `test_scheduler`,
 `test_scheduler_watchdog`, `test_job_monitor`, `test_metrics_alerts`, `test_llm_router`,
 `test_interpreter` / `test_deterministic_interpreter`, `test_screener_quality`,
 `test_data_fetcher`, `test_backfill`, `test_enrichment`, `test_news`, `test_email_verification`,
@@ -1299,6 +1321,10 @@ portable mirror and pinned in sync by `npm run verify:headers`.
   shared pool WAITS up to `POOL_CHECKOUT_WAIT_SECONDS` for a free connection (psycopg2 itself
   raises at once). The filter whitelist is enforced in `_build_filter_where` for BOTH sides —
   don't move it back to the callers.
+- **Public copy is checked against code** (`tests/test_public_claims.py`). Changing Monte Carlo
+  runs, walk-forward windows, fees, the free allowance, the ETF set or the split example means
+  updating the pages that quote them; a figure on `/verification` must come from a test or a dated
+  run — if a check has not run, the page says so.
 - **Never let a digest go out with a dead unsubscribe link** — `run_weekly_digest` refuses
   without `SHARE_BASE_URL`; GET on `/email/unsubscribe` must stay side-effect free (scanners).
   A `'sending'` ledger row is never retried: a missed email beats a duplicate.
@@ -1319,6 +1345,18 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 ## 19. Recent significant changes
 
 These shaped current behavior — don't "clean up" them without understanding why:
+
+- **Day 14 — make every claim true:** volume backfilled from stored daily bars
+  (`cache_warmer.backfill_volume_from_history`, `compute_indicators` volume; a volume filter reports
+  `data_quality.partial_coverage`); a curated, labelled ETF set (`src/etfs.py`, `asset_type`,
+  migration `e9f0a1b2c3d4`; screens stay stocks-only unless asked); the never-proven LSE history
+  source deleted; `/meta` example queries that silently dropped clauses ("low debt", "high profit
+  margins", "strong momentum") replaced and pinned; public `/verification` page (golden set,
+  dated accuracy loop, split worked example, seven drills, what is not covered) linked from the
+  landing page and footer; landing rewritten around testing ideas (signed-in search now opens the
+  Backtest page); stale public claims removed (1,400+ stocks, 24/7, real-time, 10 backtests/day,
+  "trains on the past", demo-only sparklines, test/line counts, broker integration) and
+  `tests/test_public_claims.py` keeps them out. Risk page fill statement corrected (next-day open).
 
 - **Day 12 — entitlements without a payment provider:** `src/entitlements.py` (`plan_for`, the
   one decision) + `src/billing.py` (`BillingProvider`, `ManualBillingProvider`) + `gate()` on the

@@ -49,9 +49,9 @@ const GROUPS = [
     tagline: '10 years, exactly simulated',
     rows: [
       {
-        label: 'Full verified history',
+        label: 'Adjusted daily history',
         detail:
-          'Daily OHLCV for the entire universe, backfilled and checked. No sampled candles, no gaps.',
+          'Ten years of daily bars, split- and dividend-adjusted, cached per symbol and re-fetched whenever the cache does not cover the window you asked for.',
       },
       {
         label: 'Exact rule simulation',
@@ -83,7 +83,7 @@ const GROUPS = [
       {
         label: 'Sentiment pipeline',
         detail:
-          'News scored bullish / neutral / bearish per symbol by a multi-provider LLM router with instant failover.',
+          'Headlines scored bullish / neutral / bearish per symbol by a language model, with failover across providers.',
       },
       {
         label: 'News feed',
@@ -91,7 +91,7 @@ const GROUPS = [
       },
       {
         label: 'Watchlist',
-        detail: 'Track candidates with live price changes and sparklines from the dashboard.',
+        detail: 'Track candidates and their latest price change from the dashboard.',
       },
     ],
   },

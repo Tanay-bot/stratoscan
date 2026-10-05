@@ -6,15 +6,26 @@
 // then re-emulate 'reduce' at the end to verify the a11y fallback.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+// CHROME_PATH (or Playwright's PW_CHROMIUM_PATH) overrides the macOS default.
+const CHROME =
+  process.env.CHROME_PATH ||
+  process.env.PW_CHROMIUM_PATH ||
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const PORT = 9333
 const VITE_PORT = 5180
 const BASE = `http://localhost:${VITE_PORT}`
+// The landing's rotating prompts are strategy-template queries (Day 8).
+const TEMPLATE_PROMPTS = [
+  ...readFileSync(
+    join(fileURLToPath(new URL('.', import.meta.url)), 'src/lib/templates.ts'),
+    'utf8',
+  ).matchAll(/query:\s*'([^']+)'/g),
+].map((m) => m[1])
 const userDir = mkdtempSync(join(tmpdir(), 'stratoscan-cdp-'))
 
 // Never attach to a stale Chrome leaked by a crashed previous run (it carries
@@ -24,20 +35,29 @@ spawnSync('sh', ['-c', `lsof -ti tcp:${PORT} 2>/dev/null | xargs -r kill -9 2>/d
 // Hermetic: spawn our OWN Vite dev server in demo mode (the shipped default is
 // live API mode — see .env — but this harness drives the synthetic data path),
 // so it never depends on whatever server the user happens to have on :5173.
-spawnSync('sh', ['-c', `lsof -ti tcp:${VITE_PORT} 2>/dev/null | xargs -r kill -9 2>/dev/null || true`])
+spawnSync('sh', [
+  '-c',
+  `lsof -ti tcp:${VITE_PORT} 2>/dev/null | xargs -r kill -9 2>/dev/null || true`,
+])
 const FRONTEND_DIR = fileURLToPath(new URL('.', import.meta.url))
 // Spawn the LOCAL vite binary by absolute path — subagent shells may not have npx on PATH.
-const vite = spawn(join(FRONTEND_DIR, 'node_modules', '.bin', 'vite'), ['--port', String(VITE_PORT), '--strictPort'], {
-  cwd: FRONTEND_DIR,
-  env: { ...process.env, VITE_DEMO_MODE: 'true', VITE_API_URL: '/api' },
-  stdio: 'ignore',
-})
+const vite = spawn(
+  join(FRONTEND_DIR, 'node_modules', '.bin', 'vite'),
+  ['--port', String(VITE_PORT), '--strictPort'],
+  {
+    cwd: FRONTEND_DIR,
+    env: { ...process.env, VITE_DEMO_MODE: 'true', VITE_API_URL: '/api' },
+    stdio: 'ignore',
+  },
+)
 const viteReady = await (async () => {
   for (let i = 0; i < 60; i++) {
     try {
       const r = await fetch(`${BASE}/`)
       if (r.ok) return true
-    } catch { /* not up yet */ }
+    } catch {
+      /* not up yet */
+    }
     await new Promise((r) => setTimeout(r, 250))
   }
   return false
@@ -57,6 +77,8 @@ const chrome = spawn(
     '--no-default-browser-check',
     '--disable-gpu',
     '--disable-dev-shm-usage',
+    // Chromium refuses to start as root without this (CI containers, sandboxes).
+    ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     '--window-size=1440,2600',
     'about:blank',
   ],
@@ -111,14 +133,30 @@ ws.onmessage = (ev) => {
 
 // Always reap the browser + temp dir + own vite server, even if a later step throws.
 const cleanup = () => {
-  try { ws.close() } catch {}
-  try { chrome.kill('SIGKILL') } catch {}
-  try { vite.kill('SIGKILL') } catch {}
-  try { rmSync(userDir, { recursive: true, force: true }) } catch {}
+  try {
+    ws.close()
+  } catch {}
+  try {
+    chrome.kill('SIGKILL')
+  } catch {}
+  try {
+    vite.kill('SIGKILL')
+  } catch {}
+  try {
+    rmSync(userDir, { recursive: true, force: true })
+  } catch {}
 }
 process.on('exit', cleanup)
-process.on('uncaughtException', (err) => { cleanup(); console.error('HARNESS CRASH:', err); process.exit(1) })
-process.on('unhandledRejection', (err) => { cleanup(); console.error('HARNESS CRASH:', err); process.exit(1) })
+process.on('uncaughtException', (err) => {
+  cleanup()
+  console.error('HARNESS CRASH:', err)
+  process.exit(1)
+})
+process.on('unhandledRejection', (err) => {
+  cleanup()
+  console.error('HARNESS CRASH:', err)
+  process.exit(1)
+})
 
 function send(method, params = {}) {
   return new Promise((resolve, reject) => {
@@ -130,7 +168,8 @@ function send(method, params = {}) {
 
 async function evalJS(expression) {
   const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
-  if (r.exceptionDetails) throw new Error('eval failed: ' + JSON.stringify(r.exceptionDetails).slice(0, 400))
+  if (r.exceptionDetails)
+    throw new Error('eval failed: ' + JSON.stringify(r.exceptionDetails).slice(0, 400))
   return r.result.value
 }
 
@@ -152,7 +191,7 @@ async function poll(expr, expect, timeoutMs = 5000) {
 await send('Page.enable')
 await send('Runtime.enable')
 
-async function navigate(url, readySelector = "input[aria-label=\"Screen query\"]") {
+async function navigate(url, readySelector = 'input[aria-label="Idea to test"]') {
   await send('Page.navigate', { url })
   for (let i = 0; i < 100; i++) {
     if (await evalJS("document.readyState === 'complete'")) break
@@ -165,34 +204,59 @@ async function navigate(url, readySelector = "input[aria-label=\"Screen query\"]
 }
 
 // Force motion ON before the page's modules read matchMedia at load time.
-await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+await send('Emulation.setEmulatedMedia', {
+  features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n=== 0. Env probe ===')
 await navigate(BASE + '/')
 const reduceNow = await evalJS("matchMedia('(prefers-reduced-motion: reduce)').matches")
-check('env: reduced-motion emulated OFF (animations will run)', reduceNow === false, `reduce=${reduceNow}`)
+check(
+  'env: reduced-motion emulated OFF (animations will run)',
+  reduceNow === false,
+  `reduce=${reduceNow}`,
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n=== 1. Landing: hero market-floor is LIVE ===')
 // Chart draw-in: sample the reveal clip rect's width rapidly after load to catch it mid-flight
 const revealW = []
 for (let i = 0; i < 8; i++) {
-  revealW.push(await evalJS("parseFloat(getComputedStyle(document.querySelector('[data-reveal]')).width)"))
+  revealW.push(
+    await evalJS("parseFloat(getComputedStyle(document.querySelector('[data-reveal]')).width)"),
+  )
   await sleep(120)
 }
 const caughtMid = revealW.some((w) => w > 0 && w < 1200)
-const revealLate = parseFloat(await evalJS("getComputedStyle(document.querySelector('[data-reveal]')).width"))
-const revealAnim = await evalJS("getComputedStyle(document.querySelector('[data-reveal]')).animationName")
+const revealLate = parseFloat(
+  await evalJS("getComputedStyle(document.querySelector('[data-reveal]')).width"),
+)
+const revealAnim = await evalJS(
+  "getComputedStyle(document.querySelector('[data-reveal]')).animationName",
+)
 check(
   'hero: chart draws in left→right on first load',
   (caughtMid || revealLate >= 1200) && revealAnim === 'hero-reveal',
   `mid=${caughtMid} end=${revealLate} anim=${revealAnim} samples=[${revealW.join(',')}]`,
 )
-check('hero: candlestick chart painted', (await evalJS("document.querySelectorAll('rect[data-candle]').length")) >= 30)
-check('hero: close-line + gradient area drawn', await evalJS("!!document.querySelector('path[data-closeline]') && !!document.querySelector('path[data-area]')"))
+check(
+  'hero: candlestick chart painted',
+  (await evalJS("document.querySelectorAll('rect[data-candle]').length")) >= 30,
+)
+check(
+  'hero: close-line + gradient area drawn',
+  await evalJS(
+    "!!document.querySelector('path[data-closeline]') && !!document.querySelector('path[data-area]')",
+  ),
+)
 check('hero: now-beam present', await evalJS("!!document.querySelector('[data-beam]')"))
-check('hero: price gridlines + labels', await evalJS("document.querySelectorAll('line[data-grid]').length >= 3 && document.querySelectorAll('[data-gridlabel]').length >= 3"))
+check(
+  'hero: price gridlines + labels',
+  await evalJS(
+    "document.querySelectorAll('line[data-grid]').length >= 3 && document.querySelectorAll('[data-gridlabel]').length >= 3",
+  ),
+)
 
 const cc = []
 for (let i = 0; i < 5; i++) {
@@ -209,14 +273,20 @@ await send('Page.bringToFront')
 await sleep(300)
 const flashSamples = []
 for (let i = 0; i < 10; i++) {
-  flashSamples.push(await evalJS(`(() => {
+  flashSamples.push(
+    await evalJS(`(() => {
     const el = document.querySelector('circle[data-flash]')
     if (!el) return 'none'
     return getComputedStyle(el).opacity
-  })()`))
+  })()`),
+  )
   await sleep(150)
 }
-check('hero: trade flash pulses at newest candle', new Set(flashSamples).size >= 2, flashSamples.join(' -> '))
+check(
+  'hero: trade flash pulses at newest candle',
+  new Set(flashSamples).size >= 2,
+  flashSamples.join(' -> '),
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n=== 2. Landing: typewriter lifecycle ===')
@@ -227,11 +297,15 @@ console.log('\n=== 2. Landing: typewriter lifecycle ===')
 // yields >= 3 distinct values and a genuinely frozen one still fails.
 const samples = []
 for (let i = 0; i < 12; i++) {
-  samples.push(await evalJS("document.querySelector('input[aria-label=\"Screen query\"]').value"))
+  samples.push(await evalJS('document.querySelector(\'input[aria-label="Idea to test"]\').value'))
   await sleep(400)
 }
 const distinct = new Set(samples)
-check('typewriter: value changes over 4.8s (typing)', distinct.size >= 3, samples.map((s) => s.slice(0, 24)).join(' | '))
+check(
+  'typewriter: value changes over 4.8s (typing)',
+  distinct.size >= 3,
+  samples.map((s) => s.slice(0, 24)).join(' | '),
+)
 
 const FULL_PROMPTS = [
   'find undervalued small-cap tech stocks',
@@ -244,7 +318,7 @@ let sawFullPrev = ''
 let sawDelete = false
 let sawNext = false
 for (let i = 0; i < 50; i++) {
-  const v = await evalJS("document.querySelector('input[aria-label=\"Screen query\"]').value")
+  const v = await evalJS('document.querySelector(\'input[aria-label="Idea to test"]\').value')
   if (FULL_PROMPTS.includes(v)) {
     if (!sawFull) {
       sawFull = true
@@ -260,19 +334,36 @@ for (let i = 0; i < 50; i++) {
 check('typewriter: reaches a full prompt (type phase)', sawFull)
 check('typewriter: deletes back down (delete phase)', sawDelete)
 check('typewriter: advances to next prompt', sawNext)
-check('typewriter: blinking block caret rendered', await evalJS("!!document.querySelector('span[style*=\"caret-blink\"]')"))
+check(
+  'typewriter: blinking block caret rendered',
+  await evalJS('!!document.querySelector(\'span[style*="caret-blink"]\')'),
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n=== 3. Landing: focus/blur/submit behavior (real CDP mouse/keyboard) ===')
 // NOTE: programmatic el.focus() does not fire React's synthetic focusin in
 // headless Chrome, so we simulate real clicks via the CDP Input domain.
 const click = async (expr) => {
-  const { x, y } = await evalJS(`(() => { const r = ${expr}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
-  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
-  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+  const { x, y } = await evalJS(
+    `(() => { const r = ${expr}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`,
+  )
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x,
+    y,
+    button: 'left',
+    clickCount: 1,
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x,
+    y,
+    button: 'left',
+    clickCount: 1,
+  })
 }
-const inputExpr = "document.querySelector('input[aria-label=\"Screen query\"]')"
-const h1Expr = 'document.querySelector(\'h1\')'
+const inputExpr = 'document.querySelector(\'input[aria-label="Idea to test"]\')'
+const h1Expr = "document.querySelector('h1')"
 
 // Wait until the typewriter is mid-text (deterministic start), THEN click in.
 await poll(`${inputExpr}.value.length > 5`, true, 6000)
@@ -280,7 +371,11 @@ const preFocus = await evalJS(`${inputExpr}.value`)
 await click(inputExpr)
 await sleep(200)
 const afterFocus = await evalJS(`${inputExpr}.value`)
-check('focus: field clears for user typing', afterFocus === '', `pre='${preFocus.slice(0, 20)}' post='${afterFocus}'`)
+check(
+  'focus: field clears for user typing',
+  afterFocus === '',
+  `pre='${preFocus.slice(0, 20)}' post='${afterFocus}'`,
+)
 const v1 = await evalJS(`${inputExpr}.value`)
 await sleep(500)
 const v2 = await evalJS(`${inputExpr}.value`)
@@ -300,55 +395,93 @@ check(
 // Focus again, clear while focused (real key events), then blur -> rotation resumes
 await click(inputExpr)
 await sleep(150)
-await send('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: 2, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 }) // meta/ctrl+A
-await send('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 2, key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65 })
-await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
-await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+await send('Input.dispatchKeyEvent', {
+  type: 'keyDown',
+  modifiers: 2,
+  key: 'a',
+  code: 'KeyA',
+  windowsVirtualKeyCode: 65,
+}) // meta/ctrl+A
+await send('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  modifiers: 2,
+  key: 'a',
+  code: 'KeyA',
+  windowsVirtualKeyCode: 65,
+})
+await send('Input.dispatchKeyEvent', {
+  type: 'keyDown',
+  key: 'Backspace',
+  code: 'Backspace',
+  windowsVirtualKeyCode: 8,
+})
+await send('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  key: 'Backspace',
+  code: 'Backspace',
+  windowsVirtualKeyCode: 8,
+})
 await sleep(150)
 await click(h1Expr)
 const resumed = await poll(`${inputExpr}.value.length > 0`, true, 4000)
 check('blur with empty: rotation resumes', resumed)
 
-// Submit while auto-typing: must navigate with the FULL current prompt (nested in ?next=)
+// Submit while auto-typing: must open a trial backtest with the FULL current
+// prompt (Day 6: no signup wall; Day 8: the prompts are template queries).
 await navigate(BASE + '/')
 await sleep(1400)
-const partialNow = await evalJS("document.querySelector('input[aria-label=\"Screen query\"]').value")
-await evalJS("document.querySelector('form[role=\"search\"] button[type=\"submit\"]').click()")
+const partialNow = await evalJS(
+  'document.querySelector(\'input[aria-label="Idea to test"]\').value',
+)
+await evalJS('document.querySelector(\'form[role="search"] button[type="submit"]\').click()')
 await sleep(900)
-const nextRaw = await evalJS("new URLSearchParams(location.search).get('next')")
-const nextDecoded = decodeURIComponent(nextRaw ?? '')
-const qInNext = new URLSearchParams(nextDecoded.split('?')[1] ?? '').get('q')
-const fullPrompts = [
-  'find undervalued small-cap tech stocks',
-  'high-dividend energy companies',
-  'momentum breakout stocks',
-  'oversold healthcare with low beta',
-]
-check('submit mid-type: navigates to /login', (await evalJS('location.pathname')) === '/login', `path=${await evalJS('location.pathname')}`)
-check('submit mid-type: q is a COMPLETE prompt', fullPrompts.includes(qInNext), `partial='${partialNow.slice(0, 28)}…' q='${qInNext}'`)
+const qInNext = await evalJS("new URLSearchParams(location.search).get('q')")
+const fullPrompts = TEMPLATE_PROMPTS
+check(
+  'submit mid-type: opens a trial backtest',
+  (await evalJS('location.pathname')) === '/try',
+  `path=${await evalJS('location.pathname')}`,
+)
+check(
+  'submit mid-type: q is a COMPLETE prompt',
+  fullPrompts.includes(qInNext),
+  `partial='${partialNow.slice(0, 28)}…' q='${qInNext}'`,
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n=== 4. Landing: BacktestShowcase behaves ===')
 await navigate(BASE + '/')
-await evalJS("document.querySelector('[aria-label=\"Illustrative equity curve versus SPY benchmark\"]').scrollIntoView({ block: 'center' })")
+await evalJS(
+  "document.querySelector('[aria-label=\"Illustrative equity curve versus SPY benchmark\"]').scrollIntoView({ block: 'center' })",
+)
 await sleep(3300)
 
 // The count-up runs over 1.4s once in view; a fixed sample can land mid-count
 // (+38.1%). Poll until the counter lands on its final value instead.
-const kpiDone = await poll("(() => { const card = document.querySelector('[aria-label=\"Illustrative equity curve versus SPY benchmark\"]')?.closest('.glass-strong'); if (!card) return false; return [...card.querySelectorAll('p')].some(p => p.textContent.trim() === '+38.2%') })()", true, 8000)
+const kpiDone = await poll(
+  "(() => { const card = document.querySelector('[aria-label=\"Illustrative equity curve versus SPY benchmark\"]')?.closest('.glass-strong'); if (!card) return false; return [...card.querySelectorAll('p')].some(p => p.textContent.trim() === '+38.2%') })()",
+  true,
+  8000,
+)
 check('showcase: KPI values counted up (Total return +38.2%)', kpiDone)
-check('showcase: all four KPI labels rendered', await evalJS(`
+check(
+  'showcase: all four KPI labels rendered',
+  await evalJS(`
   (() => {
     const card = document.querySelector('[aria-label="Illustrative equity curve versus SPY benchmark"]').closest('.glass-strong')
     return ['Total return', 'Sharpe', 'Max drawdown', 'Win rate'].every(k => card.innerText.includes(k))
   })()
-`))
-check('showcase: strategy line + area + benchmark + end dot drawn', await evalJS(`
+`),
+)
+check(
+  'showcase: strategy line + area + benchmark + end dot drawn',
+  await evalJS(`
   (() => {
     const svg = document.querySelector('[aria-label="Illustrative equity curve versus SPY benchmark"]')
     return svg.querySelectorAll('path').length >= 3 && !!svg.querySelector('circle')
   })()
-`))
+`),
+)
 const progress = await evalJS(`
   (() => {
     const card = document.querySelector('[aria-label="Illustrative equity curve versus SPY benchmark"]').closest('.glass-strong')
@@ -403,7 +536,9 @@ check('btloop: header + 3 cards', btLoop.header && btLoop.cards)
 check('btloop: strategy chips', btLoop.chips)
 check('btloop: KPI labels', btLoop.kpis)
 
-await evalJS("[...document.querySelectorAll('svg')].find(s => s.getAttribute('viewBox') === '0 0 100 80')?.scrollIntoView({ block: 'center' })")
+await evalJS(
+  "[...document.querySelectorAll('svg')].find(s => s.getAttribute('viewBox') === '0 0 100 80')?.scrollIntoView({ block: 'center' })",
+)
 await sleep(2300)
 const miniCurve = await evalJS(`
   (() => {
@@ -413,20 +548,41 @@ const miniCurve = await evalJS(`
     return { found: true, paths: svg.querySelectorAll('path').length, gradPaths }
   })()
 `)
-check('btloop: mini curve svg draws after scroll', miniCurve.found && miniCurve.gradPaths >= 1, JSON.stringify(miniCurve))
+check(
+  'btloop: mini curve svg draws after scroll',
+  miniCurve.found && miniCurve.gradPaths >= 1,
+  JSON.stringify(miniCurve),
+)
 
 // ─────────────────────────────────────────────────────────────────────────────
 console.log('\n=== 6. Backtester workspace: 3-pane layout, streaming code, chat, resizable ===')
 // Seed demo auth (ProtectedRoute needs a stored token + user in demo mode), then load the route.
 await navigate(BASE + '/')
-await evalJS(`localStorage.setItem('stratoscan_token', 'demo-token'); localStorage.setItem('stratoscan_user', JSON.stringify({ id: 1, email: 'you@stratoscan.app', plan: 'free', email_verified: true, created_at: '2026-01-01' }))`)
-await navigate(BASE + '/app/backtest?q=' + encodeURIComponent('oversold healthcare with low beta'), "input[aria-label=\"Strategy message\"]")
+await evalJS(
+  `localStorage.setItem('stratoscan_token', 'demo-token'); localStorage.setItem('stratoscan_user', JSON.stringify({ id: 1, email: 'you@stratoscan.app', plan: 'free', email_verified: true, created_at: '2026-01-01' }))`,
+)
+await navigate(
+  BASE + '/app/backtest?q=' + encodeURIComponent('oversold healthcare with low beta'),
+  'input[aria-label="Strategy message"]',
+)
 
 // 1. Three panes exist
-check('backtester: chat pane present', await evalJS("!!document.querySelector('[aria-label=\"Strategy chat\"]')"))
-check('backtester: results pane present', await evalJS("!!document.querySelector('[aria-label=\"Backtest results\"]')"))
-check('backtester: code pane present', await evalJS("!!document.querySelector('[aria-label=\"Generated strategy code\"]')"))
-check('backtester: two splitter dividers (role=separator)', (await evalJS("document.querySelectorAll('[role=separator]').length")) >= 2)
+check(
+  'backtester: chat pane present',
+  await evalJS('!!document.querySelector(\'[aria-label="Strategy chat"]\')'),
+)
+check(
+  'backtester: results pane present',
+  await evalJS('!!document.querySelector(\'[aria-label="Backtest results"]\')'),
+)
+check(
+  'backtester: code pane present',
+  await evalJS('!!document.querySelector(\'[aria-label="Generated strategy code"]\')'),
+)
+check(
+  'backtester: two splitter dividers (role=separator)',
+  (await evalJS("document.querySelectorAll('[role=separator]').length")) >= 2,
+)
 
 // 2. Default ratios: chat ~35% of width, results ~72% of the right column height
 const ratios = await evalJS(`
@@ -439,46 +595,108 @@ const ratios = await evalJS(`
     return { chat: chat.width / width, results: results.height / rightH }
   })()
 `)
-check('backtester: chat pane ~35% of width (default)', Math.abs(ratios.chat - 0.35) < 0.08, `chat=${(ratios.chat * 100).toFixed(1)}%`)
-check('backtester: results ~72% of right column (default)', Math.abs(ratios.results - 0.72) < 0.1, `results=${(ratios.results * 100).toFixed(1)}%`)
+check(
+  'backtester: chat pane ~35% of width (default)',
+  Math.abs(ratios.chat - 0.35) < 0.08,
+  `chat=${(ratios.chat * 100).toFixed(1)}%`,
+)
+check(
+  'backtester: results ~72% of right column (default)',
+  Math.abs(ratios.results - 0.72) < 0.1,
+  `results=${(ratios.results * 100).toFixed(1)}%`,
+)
 
 // 3. Auto-run from ?q= pushed a user message; code streams while the request is in flight
 await poll("document.querySelectorAll('[data-chat-msg][data-role=user]').length > 0", true, 4000)
-const codeLines1 = await evalJS("document.querySelectorAll('[aria-label=\"Generated strategy code\"] code').length")
+const codeLines1 = await evalJS(
+  'document.querySelectorAll(\'[aria-label="Generated strategy code"] code\').length',
+)
 await sleep(700)
-const codeLines2 = await evalJS("document.querySelectorAll('[aria-label=\"Generated strategy code\"] code').length")
-check('backtester: code streams line-by-line while running', codeLines2 > codeLines1, `${codeLines1} -> ${codeLines2}`)
+const codeLines2 = await evalJS(
+  'document.querySelectorAll(\'[aria-label="Generated strategy code"] code\').length',
+)
+check(
+  'backtester: code streams line-by-line while running',
+  codeLines2 > codeLines1,
+  `${codeLines1} -> ${codeLines2}`,
+)
 
 // 4. Run completes -> results KPIs + assistant reply + code status done
-await poll("[...document.querySelectorAll('[aria-label=\"Backtest results\"]')].length > 0", true, 2000)
-const resultsOk = await poll("document.querySelector('[aria-label=\"Backtest results\"]')?.innerText.includes('Total return') ?? false", true, 12000)
+await poll(
+  '[...document.querySelectorAll(\'[aria-label="Backtest results"]\')].length > 0',
+  true,
+  2000,
+)
+const resultsOk = await poll(
+  "document.querySelector('[aria-label=\"Backtest results\"]')?.innerText.includes('Total return') ?? false",
+  true,
+  12000,
+)
 check('backtester: KPI cards render after run (Total return)', resultsOk)
-const assistOk = await poll("document.querySelectorAll('[data-chat-msg][data-role=assistant]').length > 0", true, 12000)
+const assistOk = await poll(
+  "document.querySelectorAll('[data-chat-msg][data-role=assistant]').length > 0",
+  true,
+  12000,
+)
 check('backtester: assistant reply appears in chat', assistOk)
-const codeDone = await poll("document.querySelector('[data-code-status]')?.textContent.trim() === 'done'", true, 12000)
+const codeDone = await poll(
+  "document.querySelector('[data-code-status]')?.textContent.trim() === 'done'",
+  true,
+  12000,
+)
 check('backtester: code status reaches done', codeDone)
 
 // 5. Send a new message via the composer (real CDP keyboard) -> new user + assistant turns
 // NOTE: the page renders two layouts (mobile stacked + desktop split). querySelector
 // returns the hidden mobile copy (rect 0×0) — target the VISIBLE instance instead.
-const visibleEl = (sel) => `[...document.querySelectorAll(${JSON.stringify(sel)})].find((el) => el.getClientRects().length > 0)`
-const userBefore = await evalJS("document.querySelectorAll('[data-chat-msg][data-role=user]').length")
+const visibleEl = (sel) =>
+  `[...document.querySelectorAll(${JSON.stringify(sel)})].find((el) => el.getClientRects().length > 0)`
+const userBefore = await evalJS(
+  "document.querySelectorAll('[data-chat-msg][data-role=user]').length",
+)
 const composer = visibleEl('input[aria-label="Strategy message"]')
 await click(composer)
 await sleep(150)
 await send('Input.insertText', { text: 'buy oversold tech stocks with RSI below 30' })
 // Browser default actions (implicit form submit) need rawKeyDown, not keyDown.
-await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
-await send('Input.dispatchKeyEvent', { type: 'char', key: 'Enter', text: '\r', unmodifiedText: '\r', windowsVirtualKeyCode: 13 })
-await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 })
-const sent = await poll(`document.querySelectorAll('[data-chat-msg][data-role=user]').length > ${userBefore}`, true, 5000)
+await send('Input.dispatchKeyEvent', {
+  type: 'rawKeyDown',
+  key: 'Enter',
+  code: 'Enter',
+  windowsVirtualKeyCode: 13,
+  nativeVirtualKeyCode: 13,
+})
+await send('Input.dispatchKeyEvent', {
+  type: 'char',
+  key: 'Enter',
+  text: '\r',
+  unmodifiedText: '\r',
+  windowsVirtualKeyCode: 13,
+})
+await send('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  key: 'Enter',
+  code: 'Enter',
+  windowsVirtualKeyCode: 13,
+  nativeVirtualKeyCode: 13,
+})
+const sent = await poll(
+  `document.querySelectorAll('[data-chat-msg][data-role=user]').length > ${userBefore}`,
+  true,
+  5000,
+)
 check('backtester: sending a chat message appends a user bubble', sent)
 
 // 6. Tune drawer opens/closes (visible instance; headers are CSS-uppercased -> case-insensitive)
 const tuneBtn = visibleEl('button[aria-label="Show tuning parameters"]')
 await click(tuneBtn)
 await sleep(350)
-check('backtester: Tune drawer opens (strategy builder visible)', await evalJS("document.body.innerText.toLowerCase().includes('strategy builder') && document.body.innerText.toLowerCase().includes('risk & execution')"))
+check(
+  'backtester: Tune drawer opens (strategy builder visible)',
+  await evalJS(
+    "document.body.innerText.toLowerCase().includes('strategy builder') && document.body.innerText.toLowerCase().includes('risk & execution')",
+  ),
+)
 const tuneAgain = visibleEl('button[aria-label="Hide tuning parameters"]')
 await click(tuneAgain)
 await sleep(250)
@@ -491,32 +709,77 @@ await sleep(250)
 // for the width to actually change after the release.
 await send('Page.bringToFront')
 await sleep(300)
-const chatWidthBefore = await evalJS(`${visibleEl('[data-pane-ratio]')}.getBoundingClientRect().width`)
-const vdiv = await evalJS(`(() => { const r = ${visibleEl('[role=separator]')}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`)
-await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: vdiv.x, y: vdiv.y, button: 'left', clickCount: 1 })
+const chatWidthBefore = await evalJS(
+  `${visibleEl('[data-pane-ratio]')}.getBoundingClientRect().width`,
+)
+const vdiv = await evalJS(
+  `(() => { const r = ${visibleEl('[role=separator]')}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`,
+)
+await send('Input.dispatchMouseEvent', {
+  type: 'mousePressed',
+  x: vdiv.x,
+  y: vdiv.y,
+  button: 'left',
+  clickCount: 1,
+})
 for (let i = 1; i <= 4; i++) {
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: vdiv.x + i * 25, y: vdiv.y, button: 'left', buttons: 1 })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: vdiv.x + i * 25,
+    y: vdiv.y,
+    button: 'left',
+    buttons: 1,
+  })
   await sleep(16)
 }
-await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: vdiv.x + 100, y: vdiv.y, button: 'left', clickCount: 1 })
+await send('Input.dispatchMouseEvent', {
+  type: 'mouseReleased',
+  x: vdiv.x + 100,
+  y: vdiv.y,
+  button: 'left',
+  clickCount: 1,
+})
 const chatWidthAfter = await poll(
   `${visibleEl('[data-pane-ratio]')}.getBoundingClientRect().width > ${chatWidthBefore} + 40`,
-  true, 3000,
+  true,
+  3000,
 )
-check('backtester: dragging vertical divider widens chat pane', chatWidthAfter, `${Math.round(chatWidthBefore)} -> ${Math.round((await evalJS(`${visibleEl('[data-pane-ratio]')}.getBoundingClientRect().width`)))}px`)
+check(
+  'backtester: dragging vertical divider widens chat pane',
+  chatWidthAfter,
+  `${Math.round(chatWidthBefore)} -> ${Math.round(await evalJS(`${visibleEl('[data-pane-ratio]')}.getBoundingClientRect().width`))}px`,
+)
 
 // 8. Divider is keyboard-accessible (arrow key nudges the split)
 await evalJS("document.querySelectorAll('[role=separator]')[0].focus()")
-const vn1 = await evalJS("document.querySelectorAll('[role=separator]')[0].getAttribute('aria-valuenow')")
-await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 })
-await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 })
+const vn1 = await evalJS(
+  "document.querySelectorAll('[role=separator]')[0].getAttribute('aria-valuenow')",
+)
+await send('Input.dispatchKeyEvent', {
+  type: 'keyDown',
+  key: 'ArrowRight',
+  code: 'ArrowRight',
+  windowsVirtualKeyCode: 39,
+})
+await send('Input.dispatchKeyEvent', {
+  type: 'keyUp',
+  key: 'ArrowRight',
+  code: 'ArrowRight',
+  windowsVirtualKeyCode: 39,
+})
 await sleep(150)
-const vn2 = await evalJS("document.querySelectorAll('[role=separator]')[0].getAttribute('aria-valuenow')")
+const vn2 = await evalJS(
+  "document.querySelectorAll('[role=separator]')[0].getAttribute('aria-valuenow')",
+)
 check('backtester: arrow-key resize works on divider', vn2 !== vn1, `${vn1} -> ${vn2}`)
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log('\n=== 7. Reduced-motion fallback renders safely (tape still scrolls, strobes suppressed) ===')
-await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+console.log(
+  '\n=== 7. Reduced-motion fallback renders safely (tape still scrolls, strobes suppressed) ===',
+)
+await send('Emulation.setEmulatedMedia', {
+  features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+})
 await navigate(BASE + '/')
 // After many CDP navigations headless Chrome can mark the tab occluded, which
 // suspends IntersectionObserver/rAF delivery (visibility:hidden). Bring it back.
@@ -556,18 +819,39 @@ const s7diag = await evalJS(`(async () => {
 console.log('S7 DIAG:', s7diag)
 // Typewriter: poll until it produces text, then confirm the text ADVANCES (fixed
 // samples can collide with the 2.4s hold phase, making a working typewriter look frozen).
-const typed = await poll("(document.querySelector('input[aria-label=\"Screen query\"]')?.value ?? '').length > 0", true, 6000)
-const t0len = await evalJS("document.querySelector('input[aria-label=\"Screen query\"]').value.length")
-const advanced = await poll(`document.querySelector('input[aria-label="Screen query"]').value.length !== ${t0len}`, true, 6000)
-check('reduced-motion: typewriter still types (text reveal, not motion)', typed && advanced, `typed=${typed} adv=${advanced}`)
-check('reduced-motion: no trade flash (suppressed with motion off)', (await evalJS("document.querySelectorAll('circle[data-flash]').length")) === 0)
+const typed = await poll(
+  "(document.querySelector('input[aria-label=\"Idea to test\"]')?.value ?? '').length > 0",
+  true,
+  6000,
+)
+const t0len = await evalJS(
+  'document.querySelector(\'input[aria-label="Idea to test"]\').value.length',
+)
+const advanced = await poll(
+  `document.querySelector('input[aria-label="Idea to test"]').value.length !== ${t0len}`,
+  true,
+  6000,
+)
+check(
+  'reduced-motion: typewriter still types (text reveal, not motion)',
+  typed && advanced,
+  `typed=${typed} adv=${advanced}`,
+)
+check(
+  'reduced-motion: no trade flash (suppressed with motion off)',
+  (await evalJS("document.querySelectorAll('circle[data-flash]').length")) === 0,
+)
 // The tape scroll is the same mild horizontal drift as the typewriter: kept for everyone.
 // Poll for the transient 47-candle window (present each 1.2s tick once the tape runs) —
 // fixed samples can miss it when the first tick lands late after a long prior section.
 const saw47 = await poll("document.querySelectorAll('rect[data-candle]').length === 47", true, 8000)
 check('reduced-motion: tape still scrolls (real-chart slide kept)', saw47)
 // The one-shot draw-in runs for everyone too.
-const revealRan = await poll("getComputedStyle(document.querySelector('[data-reveal]')).animationName === 'hero-reveal'", true, 8000)
+const revealRan = await poll(
+  "getComputedStyle(document.querySelector('[data-reveal]')).animationName === 'hero-reveal'",
+  true,
+  8000,
+)
 const rm = await evalJS(`
   (() => ({
     flash: document.querySelectorAll('circle[data-flash]').length,
@@ -584,7 +868,11 @@ check('reduced-motion: trade flash suppressed', rm.flash === 0, `flash=${rm.flas
 check('reduced-motion: beam static (no pulse under reduce)', rm.beam && !rm.beamAnimated)
 check('reduced-motion: particles static under reduce', !rm.particleAnimated)
 check('reduced-motion: close-line static chart present', rm.closeline)
-check('reduced-motion: chart draw-in still runs (one-shot reveal)', revealRan, `anim=${rm.revealAnim}`)
+check(
+  'reduced-motion: chart draw-in still runs (one-shot reveal)',
+  revealRan,
+  `anim=${rm.revealAnim}`,
+)
 check('reduced-motion: animateMotion suppressed', rm.animateMotionCount === 0)
 check('reduced-motion: showcase still renders', rm.showcase)
 

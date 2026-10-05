@@ -13,7 +13,7 @@ const NODES = [
     icon: Search,
     step: '02 · Screen',
     title: 'Ranked candidates',
-    body: 'The interpreter extracts criteria and ranks the whole US universe instantly.',
+    body: 'The interpreter extracts criteria and ranks about 5,000 US stocks in about a second.',
   },
   {
     icon: BarChart3,

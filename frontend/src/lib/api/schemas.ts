@@ -24,6 +24,7 @@ export const stockResultSchema = z
   .object({
     symbol: z.string(),
     company_name: z.string(),
+    asset_type: z.enum(['stock', 'etf']).optional(),
     sector: optionalString,
     industry: optionalString,
     current_price: nullableNumber,

@@ -107,7 +107,20 @@ _result(f"GET /meta filter_fields ({len(m['filter_fields'])}) incl. momentum+der
 # Example queries (frontend "try these" presets).
 assert len(m["example_queries"]) >= 5
 assert all(isinstance(q, str) and q for q in m["example_queries"])
-_result(f"GET /meta example_queries ({len(m['example_queries'])})", True)
+# Day 14: /meta advertises nothing that does not work. Every example parses on
+# the free path into real criteria, and none mentions data that doesn't exist.
+from src.deterministic_interpreter import DeterministicInterpreter  # noqa: E402
+from src.interpreter import DERIVED_CRITERIA_KEYS  # noqa: E402
+
+for q in m["example_queries"]:
+    parsed, conf = DeterministicInterpreter().parse(q)
+    n = (len(parsed.filters) + bool(parsed.sector) + bool(parsed.momentum) + bool(parsed.asset_type)
+         + sum(getattr(parsed, k) is not None for k in DERIVED_CRITERIA_KEYS))
+    assert conf >= 0.6 and n >= 2, (q, conf, n)
+    assert "debt" not in q.lower(), q  # no debt data exists
+assert any("etf" in q.lower() for q in m["example_queries"])
+assert ff["asset_type"]["query_key"] == "asset_type"
+_result(f"GET /meta example_queries ({len(m['example_queries'])}) all parse into real criteria", True)
 
 # Rate-limit budgets the frontend can surface to the user.
 for scope in ("screen", "backtest", "enrich", "read", "auth"):

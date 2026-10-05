@@ -190,6 +190,7 @@ CREATE TABLE IF NOT EXISTS stock_master (
     atr_14          DOUBLE PRECISION,
     bollinger_upper DOUBLE PRECISION,
     bollinger_lower DOUBLE PRECISION,
+    asset_type      TEXT NOT NULL DEFAULT 'stock',
     updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 """
@@ -229,6 +230,8 @@ STOCK_MASTER_COLUMN_BACKFILL = [
     "ALTER TABLE stock_master ADD COLUMN IF NOT EXISTS atr_14 DOUBLE PRECISION",
     "ALTER TABLE stock_master ADD COLUMN IF NOT EXISTS bollinger_upper DOUBLE PRECISION",
     "ALTER TABLE stock_master ADD COLUMN IF NOT EXISTS bollinger_lower DOUBLE PRECISION",
+    # Day 14: 'stock' | 'etf' (src/etfs.py is the fund set).
+    "ALTER TABLE stock_master ADD COLUMN IF NOT EXISTS asset_type TEXT NOT NULL DEFAULT 'stock'",
 ]
 
 # Market-cap sanity sweep — the final layer of the OTC/ADR unit-confusion
@@ -274,7 +277,7 @@ STOCK_MASTER_COLUMNS: frozenset = frozenset({
     "ps_ratio", "pb_ratio", "ev_ebitda", "roe_ttm", "roa_ttm",
     "gross_margin_ttm", "net_margin_ttm", "revenue_growth_ttm",
     "eps_growth_ttm", "macd_12_26", "atr_14", "bollinger_upper",
-    "bollinger_lower", "updated_at",
+    "bollinger_lower", "asset_type", "updated_at",
 })
 
 def coverage_gap_columns(
@@ -1000,6 +1003,7 @@ class PostgresDB:
                 cur.execute(APP_COUNTERS_SEED)
                 cur.execute(USAGE_COUNTERS_SCHEMA)
             conn.commit()
+        self.seed_etfs()
         logger.info(
             "PostgreSQL stock_master + users + job monitoring + backtest_jobs "
             "+ events + error_log + shared_results + saved_strategies + digest_sends "
@@ -1745,6 +1749,31 @@ class PostgresDB:
                 conn.rollback()
                 raise
         return {"jobs": jobs, "shares": shares}
+
+    def seed_etfs(self) -> int:
+        """Insert/label the curated fund set (``src/etfs.py``) — Day 14.
+
+        New rows get ``updated_at`` at the epoch, so they stay out of screens
+        (the 7-day staleness exclusion) until the price refresh writes a real
+        quote; existing rows only have their identity columns refreshed, never
+        their prices or timestamps. Idempotent; runs from ``init_schema``.
+        """
+        from src.etfs import etf_seed_records
+
+        rows = [(r["symbol"], r["company_name"], r["sector"], r["industry"])
+                for r in etf_seed_records()]
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO stock_master (symbol, company_name, sector, industry, asset_type, updated_at) "
+                    "VALUES %s ON CONFLICT (symbol) DO UPDATE SET company_name = EXCLUDED.company_name, "
+                    "sector = EXCLUDED.sector, industry = EXCLUDED.industry, asset_type = 'etf'",
+                    rows,
+                    template="(%s, %s, %s, %s, 'etf', TIMESTAMPTZ '1970-01-01 00:00:00+00')",
+                )
+            conn.commit()
+        return len(rows)
 
     def update_volumes(self, rows: List[Tuple[str, int, int]]) -> int:
         """Write (symbol, volume, avg_volume) onto EXISTING stock_master rows

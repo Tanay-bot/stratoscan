@@ -24,7 +24,16 @@ async function axe(page: Page, name: string) {
   expect(summary, `${name}: axe found serious/critical issues`).toEqual([])
 }
 
-const PUBLIC = ['/', '/pricing', '/features', '/strategies', '/login', '/signup', '/risk']
+const PUBLIC = [
+  '/',
+  '/pricing',
+  '/features',
+  '/strategies',
+  '/verification',
+  '/login',
+  '/signup',
+  '/risk',
+]
 
 for (const path of PUBLIC) {
   test(`axe: ${path}`, async ({ page }) => {

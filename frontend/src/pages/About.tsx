@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Coins, Cpu, Lock, Radar, ShieldCheck, Timer } from 'lucide-react'
 import { LandingNav } from '@/components/landing/LandingNav'
 import { Footer } from '@/components/landing/Footer'
@@ -10,7 +10,7 @@ const PILLARS = [
   {
     icon: Coins,
     title: 'Built to stay free',
-    body: 'Terminal-grade speed and depth, with no subscription and no credit card. Free isn’t a promotion here — it’s the design.',
+    body: 'The free plan has no card and no trial clock. Pro adds volume — more backtests, more saved strategies, exports, weekly emails — never accuracy.',
   },
   {
     icon: Timer,
@@ -20,7 +20,7 @@ const PILLARS = [
   {
     icon: Cpu,
     title: 'Resilient by design',
-    body: 'Built to stay up when it matters. If a data source stumbles, you’ll never notice — the terminal keeps streaming and the news keeps flowing.',
+    body: 'When a data source fails, the product says so instead of guessing: a stale price is flagged, a failed language model falls back to the next provider, and a missing explanation never blocks a result.',
   },
   {
     icon: Lock,
@@ -29,13 +29,13 @@ const PILLARS = [
   },
 ]
 
-const FACTS: { target: number; suffix: string; label: string }[] = [
+const FACTS: { target: number; suffix: string; label: string; prefix?: string }[] = [
   { target: 100, suffix: '%', label: 'of the numbers, free' },
-  { target: 1400, suffix: '+', label: 'US stocks in the universe' },
-  { target: 10, suffix: 'y', label: 'of backtest history' },
-  { target: 24, suffix: '/7', label: 'market coverage' },
-  { target: 3, suffix: 's', label: 'from idea to ranked list' },
-  { target: 10, suffix: '/day', label: 'backtests, free' },
+  { target: 5000, prefix: '~', suffix: '', label: 'US-listed stocks, plus 45 ETFs' },
+  { target: 10, suffix: 'y', label: 'of daily price history' },
+  { target: 1000, suffix: '', label: 'Monte Carlo replays per backtest' },
+  { target: 4, suffix: '', label: 'walk-forward windows per backtest' },
+  { target: 50, suffix: '/mo', label: 'backtests on the free plan' },
 ]
 
 export function About() {
@@ -82,7 +82,7 @@ export function About() {
             {FACTS.map((f) => (
               <div key={f.label}>
                 <p className="font-mono text-3xl font-bold tabular text-neon">
-                  <CountUp target={f.target} suffix={f.suffix} />
+                  <CountUp target={f.target} prefix={f.prefix} suffix={f.suffix} />
                 </p>
                 <p className="mt-1 text-xs text-text-low">{f.label}</p>
               </div>
@@ -109,14 +109,18 @@ export function About() {
               subscription tiers and spreadsheet-shaped interfaces.
             </p>
             <p>
-              Stratoscan takes the opposite bet: a natural-language interpreter turns your idea into
-              structured filters, ranks the universe in seconds, and validates the strategy on 10
-              years of real bars. The product is free because it was built to be — a promise, not a
-              promotion.
+              Stratoscan takes the opposite bet: you write the idea in plain English, it becomes
+              explicit rules, and those rules run over ten years of daily prices — fees and slippage
+              on both legs, the S&amp;P 500 alongside. The numbers are free on every plan, and how
+              we check them is public on the{' '}
+              <Link to="/verification" className="text-neon hover:underline">
+                verification page
+              </Link>
+              .
             </p>
             <p className="font-medium text-text-hi">
-              Not a stock-picking service. A bridge from idea to candidate list — you still do the
-              thinking.
+              Not a stock-picking service. We don’t tell you what to buy — we show you whether what
+              you already believe has ever been true.
             </p>
           </div>
         </motion.div>

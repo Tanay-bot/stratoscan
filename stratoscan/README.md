@@ -20,7 +20,7 @@ Four layers, each designed around **near-zero operating cost**:
 | Layer | What it does | Cost |
 |---|---|---|
 | **1. NL Interpreter** | Translates "find undervalued small-cap tech stocks with rising momentum" into structured filters | 1 LLM call per query (free-tier keys) |
-| **2. Real-Time Screener** | Filters ~5,000 US stocks from a local PostgreSQL DB | **0 API calls per query** |
+| **2. Screener** | Filters ~5,000 US stocks from a local PostgreSQL DB | **0 API calls per query** |
 | **3. Backtesting Engine** | Simulates a strategy on 10 years of OHLCV with fees + slippage, stops, sizing, Monte Carlo, walk-forward | yfinance downloads (cached in the backtest DB — Neon in prod, SQLite in dev) |
 | **4. Enrichment** | News + sentiment for top matches, stored in a separate news DB | Batch job, 0 calls per query |
 
@@ -278,7 +278,7 @@ stratoscan/
 ## Roadmap
 
 - [x] NL interpreter (free LLM keys, cost discipline)
-- [x] Real-time screener (0 API calls per query)
+- [x] Screener over a pre-fetched universe (0 API calls per query)
 - [x] Backtesting engine (free, rule-based strategies)
 - [x] Auth (JWT) + entitlements (Free / Pro, `plan_for`; accuracy never gated)
 - [x] Signup email verification (SendGrid, stdlib-only client, alembic migration)

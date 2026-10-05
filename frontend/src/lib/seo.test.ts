@@ -4,7 +4,7 @@ import { routeMeta, SITE } from './seo'
 describe('routeMeta', () => {
   it('maps the landing page', () => {
     const m = routeMeta('/')
-    expect(m.title).toBe('Stratoscan — Bridge from idea to candidate list')
+    expect(m.title).toBe('Stratoscan — Has your investing idea ever worked?')
     expect(m.noindex).toBe(false)
     expect(m.path).toBe('/')
   })

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { ArrowDownRight, ArrowUpRight, Clock } from 'lucide-react'
 import type { StockResult } from '@/lib/api/types'
+import { EtfBadge } from '@/components/EtfBadge'
 import { fmtCurrency, fmtMarketCap, fmtPct } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -88,6 +89,7 @@ export function StockRow({ stock, index }: { stock: StockResult; index: number }
             <span className="font-mono text-sm font-bold tracking-wide text-text-hi">
               {stock.symbol}
             </span>
+            {stock.asset_type === 'etf' && <EtfBadge />}
             <DataAgeBadge stock={stock} />
           </p>
           <p className="truncate text-xs text-text-low">{stock.company_name}</p>

@@ -38,6 +38,7 @@ from src.data_fetcher import (
 from src.database import PostgresDB, NewsDB
 from src.job_monitor import JobMonitor, get_job_monitor_store
 from src.cache_warmer import backfill_volume_from_history, warm_backtest_cache
+from src.etfs import ETF_SYMBOLS, with_etfs
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,11 @@ class DataRefreshScheduler:
 
         with self._monitor.run("price_refresh") as run:
             run.details = label
-            symbols = self._get_symbols()
+            # Day 14: quotes + technicals cover the curated ETF set too (the
+            # Finnhub listing is stocks only). Fundamentals do not — funds
+            # have no company profile to refresh.
+            stocks = self._get_symbols()
+            symbols = with_etfs(stocks) if stocks else []
 
             if not symbols:
                 run.status = "skipped"
@@ -151,7 +156,10 @@ class DataRefreshScheduler:
                 tech_symbols = None
                 if include_technicals:
                     try:
-                        tech_symbols = self._db.get_top_symbols(500)
+                        top = self._db.get_top_symbols(500)
+                        # + the ETF set (no market cap, so never in the top
+                        # 500), appended so the cap order is kept.
+                        tech_symbols = top + sorted(ETF_SYMBOLS - set(top))
                     except Exception as e:
                         logger.debug(
                             "get_top_symbols failed (%s) — technicals fall back to symbols[:500]",

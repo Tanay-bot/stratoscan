@@ -9,11 +9,11 @@
 
 export const SITE = {
   name: 'Stratoscan',
-  tagline: 'Bridge from idea to candidate list',
+  tagline: 'Has your investing idea ever worked?',
   /** Canonical origin — override via VITE_SITE_URL at build/deploy time. */
   url: (import.meta.env.VITE_SITE_URL as string | undefined) ?? 'https://stratoscan.com',
   description:
-    'Turn plain-English investing ideas into ranked, backtested stock lists. Stratoscan screens the market for you — no spreadsheet required.',
+    'Describe an investing idea in plain English and see whether it has ever worked: ten years of daily prices, fees and slippage on every trade, the S&P 500 alongside — and the evidence that the numbers are right.',
   /** Absolute path (public/) to the share image. */
   image: '/og-image.png',
   twitterHandle: '@stratoscan',
@@ -31,7 +31,7 @@ export interface RouteMeta {
 export const PUBLIC: RouteMeta[] = [
   {
     path: '/',
-    title: 'Stratoscan — Bridge from idea to candidate list',
+    title: 'Stratoscan — Has your investing idea ever worked?',
     description: SITE.description,
     noindex: false,
   },
@@ -89,6 +89,13 @@ export const PUBLIC: RouteMeta[] = [
     title: 'Risk Disclaimer — Stratoscan',
     description:
       'What a backtest can and cannot tell you: survivorship bias, look-ahead limits, data that can be stale, and why a simulated result is not investment advice.',
+    noindex: false,
+  },
+  {
+    path: '/verification',
+    title: 'How We Check the Numbers — Stratoscan',
+    description:
+      'The evidence behind every backtest: frozen golden numbers, an accuracy loop that recomputes every figure, a 2-for-1 split worked example, seven failure drills — and what is not covered.',
     noindex: false,
   },
   {

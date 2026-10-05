@@ -45,10 +45,11 @@ const SECTIONS = [
     body: (
       <>
         <p>
-          Signals are computed from closing prices, and trades are executed with the same
-          day&rsquo;s bar plus fees and slippage. That is a reasonable approximation, not a
-          tick-accurate fill model: real orders face spreads, partial fills, halts and liquidity you
-          cannot demand from a daily bar.
+          Signals are computed from a day&rsquo;s closing price and filled at the next day&rsquo;s
+          open, plus fees and slippage &mdash; a stop that gaps through its level fills at the open,
+          not at the level. That is a reasonable approximation, not a tick-accurate fill model: real
+          orders face spreads, partial fills, halts and liquidity you cannot demand from a daily
+          bar.
         </p>
         <p>
           Fundamentals (P/E, market cap, margins) enter at the screening step, where they are the
@@ -133,7 +134,7 @@ export function Risk() {
       eyebrow="Risk disclaimer"
       title="Risk Disclaimer"
       intro="What a backtest can and cannot tell you — in plain English, before you act on a number."
-      lastUpdated="September 29, 2026"
+      lastUpdated="October 5, 2026"
       sections={SECTIONS}
     />
   )

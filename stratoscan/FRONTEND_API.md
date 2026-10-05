@@ -189,7 +189,7 @@ multi-factor composite. Response (`ScreenResponse`):
   "query": "undervalued tech stocks",
   "interpreted_filters": {"sector": "Technology", "pe_ratio": {"operator": "lte", "value": 15}},
   "total_matches": 546,
-  "results": [{"symbol": "NVDA", "company_name": "NVIDIA Corp", "current_price": 200.75, "market_cap": 4858149832767, "pe_ratio": 55.2, "rsi_14": 62, "score": 0.83, "score_components": {...}, "why_matched": ["..."], "is_stale": false, "data_age_minutes": 4, "sentiment": {...}}],
+  "results": [{"symbol": "NVDA", "company_name": "NVIDIA Corp", "asset_type": "stock", "current_price": 200.75, "market_cap": 4858149832767, "pe_ratio": 55.2, "rsi_14": 62, "score": 0.83, "score_components": {...}, "why_matched": ["..."], "is_stale": false, "data_age_minutes": 4, "sentiment": {...}}],
   "limit": 50, "offset": 0, "has_more": true, "next_offset": 50,
   "sort_by": "market_cap", "sort_desc": true,
   "applied_filters": ["pe_ratio <= 15", "sector = Technology"],
@@ -201,6 +201,11 @@ multi-factor composite. Response (`ScreenResponse`):
   `data_quality.error` explains — never a bare 500.
 - `market_cap` is in **USD**; `current_price` in USD; yields/margins/growth
   in **percent**.
+- **ETFs (Day 14).** Every result carries `asset_type`: `"stock"` or `"etf"`. Screens
+  are stocks only unless the query asks for funds ("ETFs …", "exchange-traded funds …");
+  then `applied_filters` includes `"asset type = ETF"`, the completeness guard needs a price
+  only (funds have no market cap or P/E), and a market-cap sort becomes average volume
+  (`data_quality.sort_note` says so). Label funds wherever a row is shown.
 - **Volume coverage (Day 14).** `volume` / `avg_volume` come from daily bars,
   which are held for the largest names only, so a volume filter can only match
   those. When one is applied, `data_quality.partial_coverage` is

@@ -152,6 +152,14 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print("\n📦 PostgreSQL — running Alembic migrations...")
     _run_alembic_migrations()
 
+    # Day 14: the curated ETF set (src/etfs.py) — rows, not schema, so it is
+    # seeded here rather than in a migration. Idempotent.
+    if settings.has_database_url:
+        from src.database import PostgresDB
+
+        main_db = PostgresDB()
+        print(f"   ✅ {main_db.seed_etfs()} ETFs seeded (asset_type = 'etf')")
+
     # Backtesting database (dedicated Neon project when configured, else
     # the local SQLite dev file — never both as production storage)
     if settings.has_backtest_database:

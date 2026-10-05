@@ -3,6 +3,25 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 14 — Make every claim true
+
+**Shipped:** nothing advertised is broken, and the evidence is public. Volume — advertised as two
+filters and two sort columns that matched nothing — now comes from the daily bars we already
+store. Forty-five plain ETFs joined the universe, labelled everywhere and kept out of stock
+screens unless asked for. A public verification page explains the frozen golden set, the
+accuracy loop (with its honest, dated, partial last run), a 2-for-1 split that a naive
+backtester reports as a 50.1% crash and we report as the 0.3% it cost to trade, the seven
+failure drills, and a plain list of what is not covered. The landing page now sells testing an
+idea, not screening for stocks.
+
+**Broke / found:** the volume average first covered ten days, not 63 sessions — and the test
+written alongside it pinned the bug. The alternative history source had never run against its
+real API, so it is gone. Three `/meta` examples promised things the parser silently dropped
+("low debt" — there is no debt data). Public pages claimed 1,400+ stocks, 24/7 coverage,
+real-time data, 10 free backtests a day, walk-forward folds that "train", sparklines that only
+exist in demo mode, and the risk page said trades fill on the signal's own bar (they fill at the
+next open). A test now reads the copy against the code so those can't come back.
+
 ## Day 13 — Testing blitz
 
 **Shipped:** the product is now tested the way people use it and the way people attack it. Four

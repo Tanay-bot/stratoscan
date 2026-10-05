@@ -605,7 +605,9 @@ class FakeQualityDB:
     """
 
     def __init__(self, records: List[Dict[str, Any]]):
-        self._records = list(records)
+        # Mirrors the column default (``asset_type TEXT NOT NULL DEFAULT
+        # 'stock'``): a record that doesn't say is a stock.
+        self._records = [r if "asset_type" in r else {**r, "asset_type": "stock"} for r in records]
 
     # ── Filter semantics (mirrors src/database._column_conditions) ─────
     def _match(self, record: Dict[str, Any], filters: Dict[str, Any]) -> bool:

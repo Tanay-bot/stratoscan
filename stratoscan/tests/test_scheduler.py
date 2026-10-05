@@ -81,9 +81,12 @@ assert mon._store.recent_runs("price_refresh")[0]["records"] == 2
 s._db.bulk_upsert_stocks.assert_called_once_with(records)
 s._db.close.assert_called_once()  # Neon auto-suspend contract
 # include_technicals False on the first cycle (1 % 4 != 0); tech_symbols
-# is None on non-technical cycles (no DB query needed)
+# is None on non-technical cycles (no DB query needed). Day 14: quotes
+# cover the curated ETF set as well as the Finnhub stock listing.
+from src.etfs import ETF_SYMBOLS  # noqa: E402
+
 m_rpd.assert_called_once_with(
-    s._pool, ["AAPL", "MSFT"], include_technicals=False, tech_symbols=None
+    s._pool, sorted({"AAPL", "MSFT"} | ETF_SYMBOLS), include_technicals=False, tech_symbols=None
 )
 
 # Skipped when no symbols -> no DB work, status skipped
@@ -122,8 +125,9 @@ with mock.patch.object(sched, "fetch_us_stock_symbols", return_value=["A", "B", 
     for _ in range(4):
         s5.job_refresh_prices()
 last_call = m_rpd5.call_args
-assert last_call.kwargs.get("tech_symbols") == top_cap, \
-    f"4th cycle must pass top-by-cap symbols, got {last_call}"
+# Day 14: the ETF set rides along after the top 500, cap order untouched.
+assert last_call.kwargs.get("tech_symbols") == top_cap + sorted(ETF_SYMBOLS), \
+    f"4th cycle must pass top-by-cap symbols (+ ETFs), got {last_call.kwargs.get('tech_symbols')[:3]}"
 assert last_call.kwargs.get("include_technicals") is True
 print("✅ technicals universe = top-N by market cap (not alphabetical slice)")
 

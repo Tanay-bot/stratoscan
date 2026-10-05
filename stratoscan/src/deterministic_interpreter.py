@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 # Queries below this fall back to the LLM.
 CONFIDENCE_THRESHOLD = 0.6
 
+# Day 14: a query asks for funds (src/etfs.py) only with one of these words;
+# otherwise screens are stocks only.
+ETF_PATTERN = re.compile(r"\b(etfs?|exchange[- ]traded funds?|index funds?)\b")
+
 # ── Sector aliases ──────────────────────────────────────────────────────────
 # Maps common abbreviations / synonyms to the canonical sector names
 # stored in ``stock_master.sector``.
@@ -452,6 +456,10 @@ class DeterministicInterpreter:
         momentum, mom_conf = self._extract_momentum(query_lower)
         confidence_parts.append(mom_conf)
 
+        # ── 8. Asset type (Day 14) — funds only when asked for ──
+        asset_type = "etf" if ETF_PATTERN.search(query_lower) else None
+        confidence_parts.append(1.0 if asset_type else 0.0)
+
         # ── Deduplicate across extraction paths ──
         filters = self._dedup_filters(filters)
 
@@ -464,6 +472,7 @@ class DeterministicInterpreter:
             sector=sector,
             industry=industry,
             momentum=momentum,
+            asset_type=asset_type,
             **derived,
         )
         return result, confidence

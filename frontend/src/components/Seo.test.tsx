@@ -40,11 +40,11 @@ afterEach(() => cleanupHead())
 describe('Seo', () => {
   it('sets title, description, canonical and OG tags on the landing page', () => {
     renderAt('/')
-    expect(document.title).toBe('Stratoscan — Bridge from idea to candidate list')
+    expect(document.title).toBe('Stratoscan — Has your investing idea ever worked?')
     expect(document.head.querySelector('link[rel="canonical"]')?.getAttribute('href')).toMatch(
       /stratoscan\.com\/$/,
     )
-    expect(meta('property', 'og:title')).toContain('Bridge from idea')
+    expect(meta('property', 'og:title')).toContain('ever worked')
     expect(meta('property', 'og:type')).toBe('website')
     expect(meta('name', 'twitter:card')).toBe('summary_large_image')
     expect(meta('name', 'robots')).toBe('index, follow')

@@ -135,7 +135,7 @@ export function BacktestShowcase() {
             {/* Progress */}
             <div className="border-b border-white/[0.08] px-5 pb-4 pt-4">
               <div className="flex items-center justify-between font-mono text-2xs text-text-low">
-                <span>simulating 2,415 trading days…</span>
+                <span>simulating 2,515 trading days…</span>
                 <span>walk-forward · 4 folds</span>
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">

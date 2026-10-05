@@ -139,7 +139,7 @@ const STEPS: Step[] = [
     body: 'Your criteria are applied to every stock at once, and the results are ranked by a multi-factor composite across value, momentum and quality. No spreadsheets, no manual filtering — just the candidates.',
     points: [
       'Plain English in, ranked list out',
-      '1,400+ stocks ranked in seconds',
+      'About 5,000 US stocks (and 45 ETFs) ranked in about a second',
       'Saved screeners re-run in one click',
     ],
   },
@@ -147,7 +147,7 @@ const STEPS: Step[] = [
     n: '03',
     icon: BarChart3,
     title: 'Get Candidates + Validation',
-    lead: 'See a ranked list of matching stocks with real-time context — then backtest the strategy to see how it would have performed.',
+    lead: 'See a ranked list of matching stocks with their latest prices (refreshed every 15 minutes) — then backtest the strategy to see whether it has ever worked.',
     example: ['Results: 10 stocks', 'Click “Backtest”', 'See simulated performance'],
     quote:
       'Unlike traditional screeners that make you choose filters, Stratoscan translates your thesis into criteria, surfaces candidates, and validates the strategy — so you know if it would have worked.',

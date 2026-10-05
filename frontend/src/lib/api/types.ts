@@ -16,6 +16,8 @@ export interface ScreenRequest {
 export interface StockResult {
   symbol: string
   company_name: string
+  /** Day 14: 'etf' for a fund from the curated set — always label it. */
+  asset_type?: 'stock' | 'etf'
   sector?: string | null
   industry?: string | null
   current_price?: number | null

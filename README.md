@@ -13,14 +13,14 @@ Stratoscan turns plain-English investing ideas into ranked, backtested candidate
 
 | Feature | How it works |
 |---------|-------------|
-| **Natural-language screener** | Type a query in plain English. An LLM (or the hybrid deterministic parser) translates it into structured filters, then queries a local PostgreSQL database of ~5,000 US stocks. Zero API calls per screen. |
+| **Natural-language screener** | Type a query in plain English. An LLM (or the hybrid deterministic parser) translates it into structured filters, then queries a local PostgreSQL database of ~5,000 US stocks (plus 45 ETFs, on request). Zero API calls per screen. |
 | **Backtesting engine** | Simulates a strategy on 10 years of daily OHLCV with realistic fees, slippage, stop-loss, take-profit, and position sizing. Produces equity curves, Sharpe ratio, max drawdown, win rate, and a SPY benchmark comparison. |
 | **Robustness analysis** | Every backtest includes Monte Carlo outcome spread, walk-forward in-sample/out-of-sample splits, confidence intervals on Sharpe, and a parameter-sensitivity grid — so you know if the edge is real. |
 | **Portfolio simulation** | Combines N picks into one shared capital pool with equal or risk-based allocation and a rebalance schedule. Combined equity curve, drawdown, and Sharpe for the whole portfolio. |
 | **Compare mode** | Pin one strategy as a baseline, run another, and see them side-by-side on the same symbol set. |
 | **Async progress** | Backtests stream per-symbol progress so you see live status instead of a blank screen. |
 | **CSV export** | Download simulated trades or screening results as CSV. |
-| **News + sentiment** | Real-time news articles with LLM-scored bullish/bearish/neutral sentiment per stock. |
+| **News + sentiment** | News for the 150 largest stocks, refreshed every 2 hours, with LLM-scored bullish/bearish/neutral sentiment per stock. |
 | **Admin dashboard** | Self-contained HTML dashboard for operators — users, jobs, health, config warnings. |
 | **Hybrid NL parser** | Deterministic regex/dictionary for exact queries (sub-ms, zero cost), LLM fallback for fuzzy ones. |
 
@@ -95,7 +95,7 @@ Stratoscan turns plain-English investing ideas into ranked, backtested candidate
 | Error monitoring | Sentry (frontend) |
 | CI/CD | GitHub Actions (4 workflows) |
 | Deployment | Vercel (frontend) + Fly.io (backend, ~$3/mo) |
-| Testing | Vitest (205 tests), pytest (hermetic suites) |
+| Testing | Vitest, hermetic Python suites, Playwright end-to-end journeys |
 
 ---
 
@@ -425,7 +425,7 @@ python -m src.main scheduler            # Start the background scheduler
 python -m src.main warm-cache           # One-time backtest history cache warm
 
 # Frontend
-npm test                                # Run vitest (205 tests)
+npm test                                # Run vitest
 npm run typecheck                       # TypeScript strict mode check
 npm run lint                            # ESLint
 npm run format:check                    # Prettier check
@@ -450,7 +450,7 @@ pytest                                  # Full suite
 
 ```bash
 cd frontend
-npm test                                # 205 tests across 26 files
+npm test                                # vitest
 npm run verify:walkforward              # Walk-forward scale guard
 npm run verify:behavior                 # E2E behavioral verification
 ```
@@ -588,7 +588,7 @@ launch, and update this line with the date.
 ## Roadmap
 
 - [x] NL interpreter (multi-provider LLM failover + hybrid deterministic parser)
-- [x] Real-time screener (0 API calls per query)
+- [x] Screener over a pre-fetched universe (0 API calls per query)
 - [x] Backtesting engine (10y simulation, Monte Carlo, walk-forward, portfolio)
 - [x] Auth (JWT, email verification, admin roles)
 - [x] News + sentiment pipeline
@@ -599,7 +599,6 @@ launch, and update this line with the date.
 - [x] CI/CD (4 GitHub Actions workflows)
 - [x] Production deploy (Vercel + Fly.io)
 - [ ] Real-time price data (WebSocket streaming)
-- [ ] Brokerage integration (paper trading via Alpaca)
 - [ ] Multi-device personal data sync improvements
 - [ ] Advanced strategy builder (visual drag-and-drop)
 
@@ -611,4 +610,4 @@ Proprietary — see repository access controls.
 
 ---
 
-**Built with 75,000+ lines of code across Python and TypeScript. Free plan forever; the numbers are never paywalled.**
+**Free plan forever; the numbers are never paywalled.**

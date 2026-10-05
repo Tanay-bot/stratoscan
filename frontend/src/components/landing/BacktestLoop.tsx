@@ -16,7 +16,7 @@ const STEPS = [
     icon: SlidersHorizontal,
     title: 'Define the strategy',
     lead: 'Build the exact rules before any bar is touched.',
-    body: 'Compose conditions the way you think about the market — RSI thresholds, SMA crossovers, stops, take-profit and position sizing. Everything is explicit and editable.',
+    body: 'Write it the way you think about the market — RSI thresholds, moving-average trends, stops, take-profit and position sizing. Every rule is shown in plain English, and the thresholds and stops are editable.',
     chips: [
       'RSI < 30 → buy',
       'SMA-50 > SMA-200',
@@ -30,7 +30,7 @@ const STEPS = [
     icon: History,
     title: 'Replay 10 years',
     lead: 'The rules run against daily bars with walk-forward discipline.',
-    body: 'Each fold trains on the past and validates on the unseen — the same strategy that would have run in real time. Monte Carlo replays it hundreds of times.',
+    body: 'The same rules run on four windows in turn and on a 70/30 split — nothing is fitted to the data it is judged on. Monte Carlo reshuffles the trades 1,000 times.',
     curve: true,
   },
   {

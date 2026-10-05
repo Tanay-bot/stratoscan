@@ -28,14 +28,14 @@ const HERO_TEMPLATES = (
   .filter((t): t is StrategyTemplate => Boolean(t))
 
 const MARQUEE = [
-  'natural language',
-  '10 years of history',
+  'your idea, in plain english',
+  '10 years of daily prices',
+  'fees + slippage on both legs',
+  'filled at the next open',
   'monte carlo',
-  'walk-forward validation',
-  'sentiment pipeline',
+  'walk-forward windows',
   'spy benchmark',
-  'fully free',
-  'no spreadsheet required',
+  'every number re-derived',
 ]
 
 // The animated placeholder is also what "Screen" submits when nothing was
@@ -119,14 +119,15 @@ export function Landing() {
   const runSearch = (q: string) => {
     const trimmed = q.trim()
     if (!trimmed) {
-      toasts.push('info', 'Type an idea to screen', 'Try one of the example queries below.')
+      toasts.push('info', 'Type an idea to test', 'Or try one of the examples below.')
       return
     }
-    // Signed out, the idea goes straight into a free backtest (Day 6: no
-    // signup wall) — the account ask comes after the result, never before.
+    // The pitch is testing ideas (Day 14), so the idea goes straight into a
+    // backtest. Signed out that is a free trial run (Day 6: no signup wall) —
+    // the account ask comes after the result, never before.
     navigate(
       user
-        ? `/app/screener?q=${encodeURIComponent(trimmed)}`
+        ? `/app/backtest?q=${encodeURIComponent(trimmed)}`
         : `/try?q=${encodeURIComponent(trimmed)}`,
     )
   }
@@ -188,7 +189,7 @@ export function Landing() {
               transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
               className="text-4xl font-bold leading-[1.06] sm:text-6xl lg:text-6xl xl:text-7xl"
             >
-              Bridge from <span className="text-gradient">idea</span> to candidate list.
+              Has your idea ever <span className="text-gradient">actually worked</span>?
             </motion.h1>
 
             <motion.p
@@ -197,8 +198,10 @@ export function Landing() {
               transition={{ duration: 0.7, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
               className="mt-6 max-w-xl text-base leading-relaxed text-text-mid sm:text-lg"
             >
-              Stratoscan turns plain-English investing ideas into ranked, backtested candidate lists
-              — with the depth of a terminal and none of the learning curve. Free, forever.
+              Describe an investing idea in plain English. Stratoscan turns it into explicit rules
+              and replays them over ten years of daily prices &mdash; fees, slippage and the S&amp;P
+              500 alongside. We don&rsquo;t tell you what to buy. We show you whether what you
+              already believe has ever been true.
             </motion.p>
 
             {/* Search */}
@@ -230,8 +233,8 @@ export function Landing() {
                       setFocused(false)
                       if (!query.trim()) setEdited(false)
                     }}
-                    placeholder="Describe the stocks you want to find…"
-                    aria-label="Screen query"
+                    placeholder="Describe an idea to test…"
+                    aria-label="Idea to test"
                     className="peer h-12 w-full bg-transparent text-sm text-transparent caret-neon placeholder:text-text-low focus:outline-none sm:text-base"
                     spellCheck={false}
                     autoComplete="off"
@@ -250,7 +253,7 @@ export function Landing() {
                   </span>
                 </div>
                 <Button type="submit" size="lg" className="shrink-0">
-                  Screen <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  Test it <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Button>
               </form>
 
@@ -287,15 +290,15 @@ export function Landing() {
             >
               <div>
                 <p className="font-mono text-3xl font-bold tabular text-text-hi">
-                  <CountUp target={3} suffix="s" />
+                  <CountUp target={10} suffix="y" />
                 </p>
-                <p className="mt-1 text-xs text-text-low">from idea to candidates</p>
+                <p className="mt-1 text-xs text-text-low">of daily prices per test</p>
               </div>
               <div>
                 <p className="font-mono text-3xl font-bold tabular text-text-hi">
-                  <CountUp target={10} suffix="y" />
+                  <CountUp target={1000} />
                 </p>
-                <p className="mt-1 text-xs text-text-low">of backtest history</p>
+                <p className="mt-1 text-xs text-text-low">Monte Carlo replays per test</p>
               </div>
               <div>
                 <p className="font-mono text-3xl font-bold tabular text-text-hi">
@@ -305,11 +308,17 @@ export function Landing() {
               </div>
               <div>
                 <p className="font-mono text-3xl font-bold tabular text-text-hi">
-                  <CountUp target={24} suffix="/7" />
+                  <CountUp target={7} />
                 </p>
-                <p className="mt-1 text-xs text-text-low">market coverage</p>
+                <p className="mt-1 text-xs text-text-low">failure drills, published</p>
               </div>
             </motion.div>
+            <Link
+              to="/verification"
+              className="mt-6 inline-flex items-center gap-1 text-xs font-medium text-neon hover:underline"
+            >
+              How we check the numbers <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </Link>
           </div>
 
           {/* Right: terminal */}
@@ -357,15 +366,15 @@ export function Landing() {
             aria-hidden="true"
           />
           <p className="mx-auto max-w-2xl text-lg leading-relaxed text-text-mid sm:text-xl">
-            Most screeners flood you with complex data and rigid filters.
+            Most tools tell you what to buy.
           </p>
           <p className="mx-auto mt-5 max-w-3xl text-3xl font-bold leading-[1.15] sm:text-4xl lg:text-5xl">
-            Stratoscan lets you type what you're looking for in{' '}
-            <span className="text-gradient">plain English</span> — and surfaces high-potential
-            stocks instantly.
+            Stratoscan won&rsquo;t. It shows you whether what you{' '}
+            <span className="text-gradient">already believe</span> has ever been true &mdash; and
+            how it could be wrong.
           </p>
-          <p className="mt-8 whitespace-nowrap font-mono text-xs uppercase tracking-[0.3em] text-neon sm:text-sm">
-            No spreadsheet required.
+          <p className="mt-8 font-mono text-xs uppercase tracking-[0.3em] text-neon sm:text-sm">
+            Evidence, not tips.
           </p>
         </motion.div>
       </section>
@@ -373,6 +382,60 @@ export function Landing() {
       <Pipeline />
 
       <BacktestShowcase />
+
+      {/* ── Verification teaser (Day 14) ────────────────────────────── */}
+      <section className="mx-auto max-w-5xl px-5 py-16">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-60px' }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="glass-strong grid gap-8 rounded-3xl p-8 sm:p-10 lg:grid-cols-[1.2fr_1fr]"
+        >
+          <div>
+            <p className="text-2xs font-semibold uppercase tracking-[0.2em] text-neon">
+              Verification
+            </p>
+            <h2 className="mt-2 text-2xl font-bold sm:text-3xl">We publish the evidence.</h2>
+            <p className="mt-3 text-sm leading-relaxed text-text-mid">
+              Every backtester shows you numbers. Ours come with the proof that the arithmetic is
+              right &mdash; frozen reference results, a loop that recomputes every figure, seven
+              failure drills &mdash; and a plain list of what is not covered.
+            </p>
+            <Button
+              size="lg"
+              variant="outline"
+              className="mt-6"
+              onClick={() => navigate('/verification')}
+            >
+              How we check the numbers <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </div>
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-6">
+            <p className="text-2xs font-semibold uppercase tracking-wider text-text-low">
+              A 2-for-1 split, bought and held
+            </p>
+            <dl className="mt-4 space-y-3 text-sm">
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="text-text-mid">A naive backtester reports</dt>
+                <dd className="font-mono text-lg font-semibold tabular text-loss-soft">
+                  &minus;50.1%
+                </dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="text-text-mid">Stratoscan reports</dt>
+                <dd className="font-mono text-lg font-semibold tabular text-text-hi">
+                  &minus;0.3%
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-4 text-xs leading-relaxed text-text-low">
+              A split halves the price and doubles the shares &mdash; nobody loses a cent. The 0.3%
+              is the real cost of the two trades.
+            </p>
+          </div>
+        </motion.div>
+      </section>
 
       {/* ── Pricing teaser ──────────────────────────────────────────── */}
       <section className="mx-auto max-w-5xl px-5 py-10">
@@ -413,11 +476,11 @@ export function Landing() {
             aria-hidden="true"
           />
           <h2 className="relative text-3xl font-bold sm:text-5xl">
-            Your next idea is one sentence away
+            Test your next idea before you trust it
           </h2>
           <p className="relative mx-auto mt-4 max-w-md text-text-mid">
-            Describe it once, screen it instantly, backtest it for free. No card, no credits, no
-            catch.
+            One sentence in, ten years of evidence out. Three free tests without an account; no card
+            on the free plan.
           </p>
           <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" onClick={() => navigate(user ? '/app/backtest' : '/try')}>

@@ -513,6 +513,8 @@ class StockResult(BaseModel):
     dividend_yield: Optional[float] = None
     beta: Optional[float] = None
     sentiment: Optional[Dict[str, Any]] = None
+    # Day 14: "etf" for a fund from the curated set (src/etfs.py) — label it.
+    asset_type: str = "stock"
     # Tier 1: stored-but-unused fields now surfaced
     avg_volume: Optional[int] = None
     eps_ttm: Optional[float] = None
@@ -1192,6 +1194,7 @@ def _result_to_stock(r: Any) -> StockResult:
         pe_ratio=r.pe_ratio,
         rsi_14=r.rsi_14,
         volume=r.volume,
+        asset_type=getattr(r, "asset_type", "stock") or "stock",
         dividend_yield=r.dividend_yield,
         beta=r.beta,
         avg_volume=r.avg_volume,
@@ -1561,6 +1564,9 @@ class MetaResponse(BaseModel):
 FILTER_FIELDS_META: List[FilterFieldMeta] = [
     FilterFieldMeta(field="sector", operators=["eq", "in"], type="string", unit="", label="Sector", query_key="sector"),
     FilterFieldMeta(field="industry", operators=["eq", "in"], type="string", unit="", label="Industry", query_key="industry"),
+    # Day 14: "etf" switches a screen to the curated fund set (src/etfs.py);
+    # absent = stocks only.
+    FilterFieldMeta(field="asset_type", operators=["eq"], type="string", unit="", label="Asset type (ETF)", query_key="asset_type"),
     FilterFieldMeta(field="market_cap", operators=["gte", "lte"], type="number", unit="$B", label="Market cap", query_key="min_market_cap_billions/max_market_cap_billions"),
     FilterFieldMeta(field="pe_ratio", operators=["gte", "lte"], type="number", unit="x", label="P/E ratio", query_key="min_pe_ratio/max_pe_ratio"),
     FilterFieldMeta(field="rsi_14", operators=["gte", "lte"], type="number", unit="", label="RSI (14)", query_key="min_rsi/max_rsi"),
@@ -1604,10 +1610,14 @@ EXAMPLE_QUERIES = [
     "undervalued small-cap tech stocks with rising momentum",
     "large cap dividend stocks with low beta",
     "oversold healthcare stocks with high volume",
-    "banks with high profit margins and stable prices",
-    "stocks near their 52-week highs with strong momentum",
-    "profitable energy stocks with low debt",
+    "profitable energy stocks with dividend yield above 3%",
+    "stocks near their 52-week highs trading above their 200-day moving average",
+    "ETFs trading above their 200-day moving average",
 ]
+# Day 14: every example must parse on the free path into criteria that exist
+# (tests/test_frontend_meta.py). Removed: "…with low debt" (there is no debt
+# data), "…high profit margins…" and "…strong momentum" (both silently
+# dropped by the parser).
 
 
 def _endpoint_auth(path: str, methods: List[str]) -> str:
@@ -5223,7 +5233,9 @@ async def trigger_refresh(
         try:
             with monitor.run("manual_refresh") as run:
                 pool = initialize_client_pool()
-                symbols = fetch_us_stock_symbols(pool)
+                from src.etfs import with_etfs
+
+                symbols = with_etfs(fetch_us_stock_symbols(pool))  # + the ETF set (Day 14)
                 logger.info("Refresh: found %d symbols", len(symbols))
 
                 records = refresh_price_data(pool, symbols)

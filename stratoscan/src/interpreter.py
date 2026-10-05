@@ -36,6 +36,7 @@ Your task is to analyze the user's query and output a JSON object with filter fi
 Available filter fields and their valid formats:
 - "sector": string (e.g., "Technology", "Healthcare", "Finance", "Energy", "Consumer Cyclical", "Consumer Defensive", "Industrials", "Basic Materials", "Real Estate", "Utilities", "Communication Services")
 - "industry": string (e.g., "Software", "Biotechnology", "Banks")
+- "asset_type": "etf" ONLY when the user asks for ETFs / exchange-traded funds / index funds; omit otherwise (stocks are the default)
 - "max_market_cap_billions": number (maximum market cap in billions of USD)
 - "min_market_cap_billions": number (minimum market cap in billions)
 - "max_pe_ratio": number
@@ -191,6 +192,9 @@ class InterpretedQuery:
     # source the entry was created with, so the split is measured against the
     # work actually done, not against what re-requesting a query costs.
     source: str = ""
+    # Day 14: ``"etf"`` when the query asks for funds (src/etfs.py). None =
+    # stocks only — a screen never mixes funds in unless asked.
+    asset_type: Optional[str] = None
 
     @property
     def has_derived_criteria(self) -> bool:
@@ -271,7 +275,7 @@ def _convert_to_filter_criteria(parsed: Dict[str, Any]) -> List[FilterCriterion]
         # / column-to-column SQL expressions) — they are SUPPORTED fields, so
         # they must never trip the "Unknown filter field" warning, which is
         # for criteria the interpreter genuinely doesn't know.
-        if raw_key == "momentum" or raw_key in DERIVED_CRITERIA_KEYS:
+        if raw_key in ("momentum", "asset_type") or raw_key in DERIVED_CRITERIA_KEYS:
             continue  # Handled separately
 
         if raw_key not in field_mapping:
@@ -401,6 +405,8 @@ def interpret_query(query: str) -> InterpretedQuery:
         sector = parsed.get("sector")
         industry = parsed.get("industry")
         momentum = parsed.get("momentum")
+        # Strict: only the exact value "etf" switches a screen to funds.
+        asset_type = "etf" if str(parsed.get("asset_type") or "").strip().lower() == "etf" else None
 
         # Derived/boolean criteria (trend, proximity, crossovers). Only accept
         # real booleans — a malformed "truthy" string must not silently flip a
@@ -415,6 +421,7 @@ def interpret_query(query: str) -> InterpretedQuery:
             industry=industry,
             momentum=momentum,
             source="llm",
+            asset_type=asset_type,
             **derived,
         )
         if settings.cache_enabled:

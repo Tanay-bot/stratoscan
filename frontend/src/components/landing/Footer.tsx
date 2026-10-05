@@ -16,6 +16,7 @@ const COLUMNS: { title: string; links: { label: string; to: string }[] }[] = [
     title: 'Company',
     links: [
       { label: 'How it works', to: '/how-it-works' },
+      { label: 'How we check the numbers', to: '/verification' },
       { label: 'Features', to: '/features' },
       { label: 'About', to: '/about' },
       { label: 'Pricing', to: '/pricing' },
@@ -43,8 +44,9 @@ export function Footer() {
           <div>
             <Logo />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-text-mid">
-              Bridge from idea to candidate list. A natural-language market terminal with 10 years
-              of backtested history — free, forever.
+              Find out whether what you believe about the market has ever been true &mdash; ten
+              years of daily prices, and the evidence that the numbers are right. Free plan,
+              forever.
             </p>
           </div>
           {COLUMNS.map((col) => (

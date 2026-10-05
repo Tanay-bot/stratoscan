@@ -15,6 +15,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/EmptyState'
+import { EtfBadge } from '@/components/EtfBadge'
 import { StockPriceChart } from '@/components/charts/StockPriceChart'
 import { SentimentBadge } from '@/components/SentimentBadge'
 import { stockDetail, newsForSymbol } from '@/lib/api/services'
@@ -141,9 +142,18 @@ export function StockDetail() {
             {stock.symbol}
           </div>
           <div>
-            <h1 className="text-2xl font-bold">{stock.company_name}</h1>
+            <h1 className="flex items-center gap-2 text-2xl font-bold">
+              {stock.company_name}
+              {stock.asset_type === 'etf' && <EtfBadge />}
+            </h1>
             <p className="mt-0.5 text-sm text-text-mid">
-              {stock.sector} · {stock.industry}
+              {[
+                stock.asset_type === 'etf' ? 'Exchange-traded fund' : null,
+                stock.sector,
+                stock.industry,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           </div>
         </div>

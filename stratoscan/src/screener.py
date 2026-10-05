@@ -98,6 +98,7 @@ class ScreenerResult:
     pe_ratio: Optional[float] = None
     rsi_14: Optional[float] = None
     volume: Optional[int] = None
+    asset_type: str = "stock"  # Day 14: "stock" | "etf"
     dividend_yield: Optional[float] = None
     beta: Optional[float] = None
     # Tier 1: previously stored-but-unused fields now surfaced to the API
@@ -147,6 +148,7 @@ class ScreenerResult:
             pe_ratio=record.get("pe_ratio"),
             rsi_14=record.get("rsi_14"),
             volume=record.get("volume"),
+            asset_type=record.get("asset_type") or "stock",
             dividend_yield=record.get("dividend_yield"),
             beta=record.get("beta"),
             avg_volume=record.get("avg_volume"),
@@ -813,6 +815,13 @@ class StockScreener:
         if query.industry:
             db_filters["industry"] = query.industry
             applied.append(f"industry = {query.industry}")
+        # Day 14: stocks only unless the query asks for funds (never relaxed,
+        # like sector — it is the subject of the query, not a criterion).
+        if getattr(query, "asset_type", None) == "etf":
+            db_filters["asset_type"] = "etf"
+            applied.append("asset type = ETF")
+        else:
+            db_filters["asset_type"] = "stock"
 
         # Tier 1: derived/boolean criteria → SQL expressions
         self._apply_derived_filters(
@@ -859,17 +868,26 @@ class StockScreener:
         )
 
         # Tier 3: minimum-completeness guard — rows missing BOTH price and
-        # market cap can't be ranked or displayed meaningfully.
+        # market cap can't be ranked or displayed meaningfully. Funds have no
+        # market cap (Day 14), so an ETF screen requires the price only.
+        funds = db_filters.get("asset_type") == "etf"
         has_price = "current_price" in db_filters
         if not has_price:
             db_filters["current_price"] = ("neq", None)
-        db_filters.setdefault("market_cap", ("neq", None))
-        applied.append("has price + market cap (completeness guard)")
+        if funds:
+            applied.append("has price (completeness guard)")
+        else:
+            db_filters.setdefault("market_cap", ("neq", None))
+            applied.append("has price + market cap (completeness guard)")
 
         sort_in_db = sort_by if sort_by != "score" else "market_cap"
         if sort_by not in SORTABLE_COLUMNS:
             logger.warning("Unknown sort_by %r — falling back to market_cap", sort_by)
             sort_by, sort_in_db = "market_cap", "market_cap"
+        if funds and sort_in_db == "market_cap":
+            # No fund has a market cap; rank by average volume (liquidity)
+            # and say so instead of returning an arbitrary order.
+            sort_in_db = "avg_volume"
 
         score_sort = sort_by == "score"
 
@@ -939,6 +957,10 @@ class StockScreener:
 
             data_quality = self._data_quality_note()
             data_quality["stale_exclusion_days"] = STALE_EXCLUSION_DAYS
+            if funds and not score_sort and sort_in_db == "avg_volume" and sort_by == "market_cap":
+                data_quality["sort_note"] = (
+                    "Funds have no market cap, so these are sorted by average volume."
+                )
             if score_sort and total_matches > SCORE_SORT_MAX_WINDOW:
                 data_quality["score_window"] = SCORE_SORT_MAX_WINDOW
                 data_quality["score_note"] = (
