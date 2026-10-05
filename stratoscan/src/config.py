@@ -300,6 +300,13 @@ class Settings(BaseSettings):
     # in production.
     #   RATE_LIMIT_BYPASS_IPS=127.0.0.1,::1,192.168.1.5
     rate_limit_bypass_ips: str = ""
+    # The header carrying the REAL client IP when the API sits behind a
+    # proxy (Day 13). Blank = the socket peer (correct locally and in
+    # tests). Behind Fly the socket peer is Fly's proxy, so every visitor
+    # shared ONE per-IP bucket; set this to "Fly-Client-IP", which Fly's
+    # edge sets and overwrites. Never X-Forwarded-For: a client can prepend
+    # anything to it. Only set it behind a proxy that overwrites the header.
+    client_ip_header: str = ""
     # Per-IP DEFAULT caps for the generic "read" bucket — the budget every
     # request falls into unless an endpoint is explicitly scoped to a
     # tighter bucket (screen/enrich/backtest/refresh are cost shields and

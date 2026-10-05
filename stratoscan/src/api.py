@@ -241,6 +241,28 @@ def _scope_for_path(path: str) -> str:
     return "read"
 
 
+def _client_ip(request: Request) -> str:
+    """The visitor's IP for rate limiting.
+
+    The socket peer, unless ``CLIENT_IP_HEADER`` names a header a trusted
+    proxy sets AND overwrites (Fly-Client-IP). Forwarding headers a client
+    controls (X-Forwarded-For, Forwarded, X-Real-IP) are never read, so a
+    forged one cannot buy a fresh bucket. A configured header that is
+    missing or not an IP falls back to the socket peer.
+    """
+    import ipaddress
+
+    peer = request.client.host if request.client else "unknown"
+    name = (settings.client_ip_header or "").strip()
+    if not name:
+        return peer
+    raw = (request.headers.get(name) or "").split(",")[0].strip()
+    try:
+        return str(ipaddress.ip_address(raw))
+    except ValueError:
+        return peer
+
+
 def _canonical_ip(raw: str) -> str:
     """Canonicalize an IP string so equivalent addresses match exactly.
 
@@ -306,7 +328,7 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        ip = request.client.host if request.client else "unknown"
+        ip = _client_ip(request)
         if _canonical_ip(ip) in self._bypass_ips:
             await self.app(scope, receive, send)
             return
@@ -5688,6 +5710,21 @@ def _capture_error(request, exc: Exception) -> None:
         logger.warning("Could not persist error_log row: %s", write_failure)
 
 
+def _is_db_outage(exc: Exception) -> bool:
+    """The database is unreachable (Neon waking, network, pool exhausted)."""
+    try:
+        import psycopg2
+        import psycopg2.pool
+    except ImportError:  # pragma: no cover
+        return False
+    return isinstance(
+        exc, (psycopg2.OperationalError, psycopg2.InterfaceError, psycopg2.pool.PoolError)
+    )
+
+
+DB_UNAVAILABLE_DETAIL = "The database is briefly unavailable. Please try again in a moment."
+
+
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc: Exception):
     """Catch-all error handler — logs, records, and returns a generic 500.
@@ -5696,7 +5733,20 @@ async def generic_exception_handler(request, exc: Exception):
     string, no exception text); what is new is the ``error_log`` row, which is
     how "find out when something breaks" stops meaning "read the logs on the
     machine".
+
+    Day 13 failure drill: a database that is unreachable mid-request is an
+    outage, not a bug — 503 with ``Retry-After`` (clients back off and retry),
+    never 500. Nothing is written to ``error_log``: the database it would go
+    to is the thing that is down.
     """
+    if _is_db_outage(exc):
+        logger.warning("Database unavailable during %s %s: %s",
+                       request.method, _error_route_template(request), type(exc).__name__)
+        return JSONResponse(
+            status_code=503,
+            content={"error": True, "detail": DB_UNAVAILABLE_DETAIL, "status_code": 503},
+            headers={"Retry-After": "10"},
+        )
     logger.exception("Unhandled exception: %s", exc)
     _capture_error(request, exc)
     return JSONResponse(

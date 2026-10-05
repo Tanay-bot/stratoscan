@@ -2348,6 +2348,13 @@ class PostgresDB:
         params: List[Any] = []
 
         for col, value in filters.items():
+            # Both sides of every condition are whitelisted HERE, at the one
+            # place SQL is written — not only by the callers that build the
+            # dict (Day 13 adversarial review: the interpreter's field_mapping
+            # kept the LHS closed in practice, but the DB layer itself did
+            # not enforce it, so the guarantee depended on every caller).
+            if col not in STOCK_MASTER_COLUMNS:
+                raise ValueError(f"unknown column in filter: {col!r}")
             conds, ps = self._column_conditions(col, value)
             conditions.extend(conds)
             params.extend(ps)

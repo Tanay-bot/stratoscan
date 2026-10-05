@@ -22,6 +22,9 @@ kill_timeout = 5
 [env]
   # Real values come from `fly secrets set` — never commit secrets.
   RATE_LIMIT_ENABLED = "true"
+  # The socket peer is Fly's proxy; Fly-Client-IP is set (and overwritten)
+  # by Fly's edge — the only trustworthy per-visitor IP (src/config.py).
+  CLIENT_IP_HEADER = "Fly-Client-IP"
 
 [http_service]
   internal_port = 8000

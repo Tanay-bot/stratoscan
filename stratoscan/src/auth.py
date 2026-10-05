@@ -322,8 +322,15 @@ def _fetch_user(user_id: int) -> Optional[Dict[str, Any]]:
     try:
         return PostgresDB().get_user_by_id(user_id)
     except Exception as e:
+        # NOT "no such user": answering 401 here made the frontend log every
+        # signed-in person out during a database blip (Day 13 drill). An
+        # outage is a 503 the client retries; only a missing row is a 401.
         logger.error("Failed to load user %s: %s", user_id, e)
-        return None
+        raise HTTPException(
+            status_code=503,
+            detail="The database is briefly unavailable. Please try again in a moment.",
+            headers={"Retry-After": "10"},
+        )
 
 
 def get_current_user(request: Request) -> Dict[str, Any]:

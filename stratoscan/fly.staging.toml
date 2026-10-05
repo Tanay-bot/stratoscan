@@ -25,6 +25,8 @@ kill_timeout = 5
   # Rate limiter OFF on staging so E2E tests and release-gate probes never
   # trip 429s (same as the local staging.env).
   RATE_LIMIT_ENABLED = "false"
+  # Parity with production (src/config.py CLIENT_IP_HEADER).
+  CLIENT_IP_HEADER = "Fly-Client-IP"
   REDIS_RATE_LIMIT_ENABLED = "false"
   APP_ENV = "staging"
   # The Dockerfile entrypoint starts the API on the standard 8000 (the
