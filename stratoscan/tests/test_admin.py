@@ -326,8 +326,9 @@ r = client.patch(
     f"/admin/users/{bob_id}", json={"plan": "premium"},
     headers=_auth_headers(admin_tok),
 )
-assert r.status_code == 200 and r.json()["plan"] == "premium", r.text
-assert fake_db.get_user_by_id(bob_id)["plan"] == "premium"
+# "premium" is the old name of the Pro tier (Day 12): accepted, stored as pro.
+assert r.status_code == 200 and r.json()["plan"] == "pro", r.text
+assert fake_db.get_user_by_id(bob_id)["plan"] == "pro"
 
 # Grant admin (bob already admin from bootstrap; use carol).
 r = client.patch(

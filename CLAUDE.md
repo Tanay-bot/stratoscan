@@ -51,8 +51,13 @@ momentum") → an LLM (or a deterministic regex parser) converts it to structure
 backtester simulates the strategy on 10 years of daily OHLCV with fees, slippage, stops, Monte
 Carlo, walk-forward and a SPY benchmark.
 
-**There is no paywall.** Registration exists only for per-user rate limiting. `plan` is kept for
-forward-compat; the Stripe billing layer was removed.
+**Two plans, and the numbers are never paywalled (Day 12).** Free (forever) and Pro. Exactly four
+capabilities differ — backtests per month, saved-strategy count, CSV export, weekly strategy
+emails — all decided by ONE function, `src/entitlements.plan_for(user)`; accuracy (history,
+robustness, the code behind a result, explanations, share pages) is identical on both. No payment
+provider yet: an admin sets plans by hand (`src/billing.ManualBillingProvider`), the first 100
+accounts are Pro for life, and no price renders until the frontend price flag is on. See
+`stratoscan/BILLING.md`.
 
 External services: **Neon** (3 PostgreSQL projects), **Upstash Redis** (exact cross-worker rate
 limits, optional), **Finnhub** (quotes/profiles/news, 10 free keys round-robin), **yfinance**
@@ -181,6 +186,8 @@ stratoscan/                          # Backend (Python)
 │   ├── strategy_templates.py # Day 8: the 15-template library (served in /meta; mirrored in frontend/src/lib/templates.ts)
 │   ├── digest.py            # Day 10: weekly saved-strategy email (light re-run, honest copy, send guarantees)
 │   ├── explain.py           # Day 11: plain-English reading of a result (facts whitelist, findings, guarded LLM narrative)
+│   ├── entitlements.py      # Day 12: plan_for(user) — the ONE entitlement decision; PLANS, grace, grandfathering
+│   ├── billing.py           # Day 12: BillingProvider interface + ManualBillingProvider (admin sets plans)
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -314,6 +321,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/auth/login` | — | JWT; timing-equalized; unverified blocked if `EMAIL_VERIFICATION_REQUIRED` |
 | GET | `/auth/me` | Bearer | current user |
 | GET/PUT | `/me/personal` | Bearer | per-user watchlist/screeners/backtests (JSONB) |
+| GET | `/me/entitlements` | Bearer | Day 12: plan in force, source (manual/grandfathered), limits, this month's usage, pending change |
 | GET/POST | `/me/strategies` | Bearer | Day 10: list / follow a finished job (rules + symbols from the server's stored result; cap 20) |
 | DELETE | `/me/strategies/{strategy_id}` | Bearer | stop following (owner-scoped WHERE) |
 | GET/PUT | `/me/email-preferences` | Bearer | `weekly_digest` on/off (+ `email_verified`) |
@@ -332,8 +340,8 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/screen` | — | NL query → ranked, paginated stocks (60s cache) |
 | POST | `/interpret` | — | debug: NL query → filters only |
 | POST | `/events` | — | browser event ingest (`src/analytics.py`); client allowlist, **400** for a server-only name; always 204 |
-| POST | `/backtest` | Bearer | full backtest (20-min frontend timeout) |
-| POST | `/backtest/async` | Bearer | start job → `job_id` |
+| POST | `/backtest` | Bearer + `gate("backtests")` | full backtest (20-min frontend timeout); charges one monthly backtest |
+| POST | `/backtest/async` | Bearer + `gate("backtests")` | start job → `job_id`; charges one monthly backtest |
 | GET | `/backtest/async/{job_id}` | Bearer | poll progress/result |
 | POST | `/try/session` | — | mint a signed trial token (`typ:"anon"`, 30 days) — Day 6 no-signup trial |
 | POST | `/try/backtest` | `X-Anon-Token` | same async job flow, owner `anon:<id>`; ≤5 symbols; 3 free runs then 403 |
@@ -344,8 +352,8 @@ marks orphaned async backtest jobs as `interrupted`.
 | GET | `/results/shares` | Bearer or `X-Anon-Token` | my live links |
 | GET | `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png` | — | public share page (server-rendered, noindex, script-free CSP, OG/Twitter card) / JSON / 1200×630 preview card |
 | POST | `/explain` | Bearer or `X-Anon-Token` | Day 11: plain-English reading of an owned finished job — deterministic `findings` + a guarded LLM `narrative` (null when down/withheld); cached by result hash |
-| POST | `/backtest/export` | Bearer | trades → CSV |
-| POST | `/screen/export` | — | screen results → CSV |
+| POST | `/backtest/export` | Bearer + `gate("csv_export")` | trades → CSV (Pro) |
+| POST | `/screen/export` | Bearer + `gate("csv_export")` | screen results → CSV (Pro; was public before Day 12) |
 | POST | `/enrich` | — | screen + sentiment |
 | GET | `/news` | — | news feed |
 | GET | `/news/{symbol}` | — | per-stock news + sentiment |
@@ -354,7 +362,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | POST | `/refresh` | admin | trigger a refresh cycle (admin-gated) |
 | GET | `/ops/jobs`, `/ops/jobs/{name}` | admin | job monitor (`require_admin` — NOT public) |
 | GET | `/admin/overview`, `/admin/users`, `/admin/jobs`, `/admin/events`, `/admin/errors` | admin | admin API (`/admin/events` = funnel read-out, `/admin/errors` = scrubbed `error_log`) |
-| PATCH | `/admin/users/{user_id}` | admin | update plan/admin/verified |
+| PATCH | `/admin/users/{user_id}` | admin | update plan (via the billing provider: `plan_change` `now` default / `scheduled`), admin, verified |
 | GET | `/admin` | admin | self-contained HTML dashboard (`admin_dashboard.py`) |
 
 ### `src/interpreter.py` — NL → structured filters
@@ -702,6 +710,20 @@ so one result gets one reading even across restarts; failed/withheld readings ar
 Tests: `tests/test_explain.py` (50 varied results, failure drill, stability); live:
 `verify_explain.py` (in the release gate — real model, ≤ 30% withheld).
 
+### `src/entitlements.py` + `src/billing.py` — tiers without a payment provider (Day 12)
+
+`plan_for(user, now=, provider=)` is the ONLY entitlement decision: grandfathered → Pro; else the
+provider's `Subscription` (`plan`, `pending_plan` at `change_at`, `grace`), with a pending change
+applied lazily once `now >= change_at`. Pure on the row `get_current_user` loaded — no cache, so an
+admin's change applies on the next request. `PLANS` (Free: 50 backtests/month, 3 saved
+strategies, no CSV, no weekly emails; Pro: unlimited, 20, yes, yes) — mirrored in
+`frontend/src/lib/plans.ts` and checked. Routes take `Depends(gate(FEATURE))` (in `api.py`), which
+403s with `upgrade_required`; `_charge_backtest` is the atomic usage charge. `BillingProvider`
+(`subscription`, `upgrade` now, `downgrade` at period end, `revoke` after `GRACE_DAYS`, `set_plan`
+immediate) has one implementation, `ManualBillingProvider`; `tests/billing_conformance.py` is the
+suite a payment adapter must also pass (see `BILLING.md` for the gaps). Grandfathering:
+`_grant_grandfather` takes a slot from `app_counters` inside the signup transaction.
+
 ### `src/backfill.py` & `src/cache_warmer.py`
 
 - `build_backfill_history(symbols, years, limit, verify)` — bulk-load yfinance OHLCV into the
@@ -727,7 +749,9 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 | Table | Key columns | Notes |
 |---|---|---|
 | `stock_master` | `symbol` PK, `company_name`, `sector`, `industry`, `market_cap`, `current_price`, `price_change_pct`, `volume`, `avg_volume`, `pe_ratio`, `eps_ttm`, `dividend_yield`, `beta`, `rsi_14`, `sma_50`, `sma_200`, `high_52w`, `low_52w`, `ps_ratio`, `pb_ratio`, `ev_ebitda`, `roe_ttm`, `roa_ttm`, `gross_margin_ttm`, `net_margin_ttm`, `revenue_growth_ttm`, `eps_growth_ttm`, `macd_12_26`, `atr_14`, `bollinger_upper/lower`, `updated_at` | The screener universe (~5,000 US, exchange-listed). NULL = no data; filters on those columns exclude rows without the field. `updated_at` drives staleness. 10 indexes on filter columns. |
-| `users` | `id` PK, `email` UNIQUE, `password_hash`, `plan` ('free'/'premium', no paywall), `email_verified`, `verification_token`, `verification_token_expires`, `is_admin`, `created_at` | PBKDF2 hashes only. |
+| `users` | `id` PK, `email` UNIQUE, `password_hash`, `plan` ('free'/'pro'; 'premium' = old name of pro), `plan_pending` / `plan_change_at` / `plan_change_reason` (a period-end downgrade or a grace-period revocation), `grandfathered_pro`, `email_verified`, `verification_token`, `verification_token_expires`, `is_admin`, `weekly_digest`, `created_at` | PBKDF2 hashes only. The plan in force is `entitlements.plan_for(row)`, never the raw column. |
+| `usage_counters` | (`user_id` FK CASCADE, `period` 'YYYY-MM', `kind`) PK, `count` | Day 12 metered usage (backtests). Charged atomically (`consume_usage`: `… WHERE count < limit`). |
+| `app_counters` | `name` PK, `value` | Counters that never go backwards; `grandfathered_pro` = slots issued (≤ 100). |
 | `job_runs` | `id`, `job_name`, `status` ('running'/'success'/'failed'/'skipped'), `started_at`, `finished_at`, `duration_ms`, `records`, `details`, `error` | Job monitor. |
 | `scheduler_heartbeat` | `id` (=1) PK, `last_beat_at`, `pid` | Single-row liveness beacon. |
 | `backtest_jobs` | `job_id` PK, `user_email`, `query`, `status` ('queued'/'running'/'done'/'error'/'interrupted'), `phase`, `done_symbols` JSONB, `total_symbols`, `result` JSONB, `error`, timestamps | Async backtest durability; orphans marked 'interrupted' on restart. |
@@ -895,6 +919,9 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
    | `anon_backtest` | 2 | 6 | 20 | `POST /try/backtest` (feeds `backtest_llm`); daily cap > the 3-run allowance so the friendly 403 comes first |
    | `share` | 10 | 100 | 400 | `/results/*` (DB writes only); `/r/*` public pages fall in `read` |
    | `explain` | 5 | 40 | 200 | `/explain` (feeds its own global `explain_llm`, never the screener's) |
+
+   These are per-IP cost shields; the per-ACCOUNT monthly backtest allowance (Day 12) is an
+   entitlement (`src/entitlements.PLANS`), counted in `usage_counters`, not a rate limit.
    | `refresh` | 1 | 10 | 50 | `/refresh` |
    | `auth` | 10 | 50 | 350 | `/auth/*` except register and the email-sending routes |
    | `register` | 3 | 10 | 30 | `/auth/register` (SendGrid cost shield) |
@@ -973,7 +1000,8 @@ Sentry `ErrorBoundary`.
 - **Auth / VerifyEmail / Settings / StockDetail** — auth forms, verification status,
   account settings, stock detail with chart + news.
 - **Landing + marketing pages** — terminal-flavored hero (animated equity lines, ticker
-  tape), features, pricing (free — no paywalls), how-it-works, legal.
+  tape), features, pricing (Free vs Pro limits from `lib/plans.ts`; no price unless the price flag
+  is on — `lib/pricing.ts`), how-it-works, legal.
 
 ### Design system
 
@@ -1222,6 +1250,11 @@ portable mirror and pinned in sync by `npm run verify:headers`.
   (plus stop/target) are applied in `_run_backtest_pipeline` and echoed in `strategy`; the
   frontend sends only what the user set. Don't reintroduce text appended to `query` — the
   parser ignores it and it shows up on share pages.
+- **Never gate accuracy, and never check a plan by hand.** Gate a route only with
+  `Depends(gate(FEATURE))` (tests/test_entitlements enumerates gates from the app — a new one
+  without a direct-API test fails), never with `user["plan"] == …`; don't add a fifth gated
+  capability without updating `entitlements.FEATURES`, `PLANS`, `lib/plans.ts` and `BILLING.md`;
+  robustness, explanations and share pages stay identical on every plan.
 - **The explanation must never become advice.** Don't loosen `COMPLIANCE_PATTERNS` to let a
   paragraph through, don't pass the model numbers outside `extract_facts`, and don't show a
   `withheld` narrative. Changing the prompt or the facts means bumping `PROMPT_VERSION`.
@@ -1245,6 +1278,15 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 ## 19. Recent significant changes
 
 These shaped current behavior — don't "clean up" them without understanding why:
+
+- **Day 12 — entitlements without a payment provider:** `src/entitlements.py` (`plan_for`, the
+  one decision) + `src/billing.py` (`BillingProvider`, `ManualBillingProvider`) + `gate()` on the
+  four gated routes + `/me/entitlements`; migration `d8e9f0a1b2c3` (plan state columns,
+  `usage_counters`, `app_counters`, first-100 grandfathering backfill, `premium` → `pro`). The
+  digest only emails entitled accounts. `/screen/export` now needs an account. Frontend: real plan
+  card in Settings, gated export buttons, plan badge, Pricing rewritten (Free vs Pro, no prices —
+  `VITE_PRICING_ENABLED`), and every "no paywall / no tiers / every feature for everyone" claim
+  corrected to "the numbers are never paywalled". `BILLING.md` lists what a payment adapter needs.
 
 - **Day 11 — explain the result:** `POST /explain` + `src/explain.py` + the Backtest page's
   "What happened" panel (`components/backtest/ExplainPanel.tsx`, under the risk disclaimer).

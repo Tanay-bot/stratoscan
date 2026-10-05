@@ -870,13 +870,33 @@
         }
       }
     },
+    "/me/entitlements": {
+      "get": {
+        "tags": [
+          "Account"
+        ],
+        "summary": "My plan, its limits and this month's usage",
+        "description": "What this account may do right now (computed per request \u2014 no cache).",
+        "operationId": "my_entitlements_me_entitlements_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/backtest": {
       "post": {
         "tags": [
           "Backtesting"
         ],
-        "summary": "Backtest a strategy (free for all authenticated users)",
-        "description": "Backtest a natural language strategy on historical data.\n\nFree for all authenticated users (the old premium paywall was\nremoved \u2014 Stratoscan is fully free). Auth still applies for\nper-user rate limiting.\n\nThe engine:\n1. Interprets your strategy description into buy/sell rules\n2. Screens for top matching stocks\n3. Downloads 10 years of OHLCV data (via yfinance)\n4. Simulates trading with fees and slippage\n5. Calculates Sharpe ratio, max drawdown, win rate",
+        "summary": "Backtest a strategy (counts toward the plan's monthly backtests)",
+        "description": "Backtest a natural language strategy on historical data.\n\nCounts toward the account's monthly backtests (Day 12 entitlements:\nFree has a monthly allowance, Pro is unlimited). The result itself is\nidentical on every plan \u2014 accuracy and robustness are never gated.\n\nThe engine:\n1. Interprets your strategy description into buy/sell rules\n2. Screens for top matching stocks\n3. Downloads 10 years of OHLCV data (via yfinance)\n4. Simulates trading with fees and slippage\n5. Calculates Sharpe ratio, max drawdown, win rate",
         "operationId": "backtest_strategy_backtest_post",
         "requestBody": {
           "content": {
@@ -2407,6 +2427,34 @@
               }
             ],
             "title": "Created At"
+          },
+          "grandfathered": {
+            "type": "boolean",
+            "title": "Grandfathered",
+            "default": false
+          },
+          "pending_plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Plan"
+          },
+          "plan_change_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Change At"
           }
         },
         "type": "object",
@@ -2424,14 +2472,20 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^(free|premium)$"
+                "pattern": "^(free|pro|premium)$"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Plan",
-            "description": "free | premium"
+            "description": "free | pro (premium is the old name for pro)"
+          },
+          "plan_change": {
+            "type": "string",
+            "pattern": "^(now|scheduled)$",
+            "title": "Plan Change",
+            "default": "now"
           },
           "is_admin": {
             "anyOf": [

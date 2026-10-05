@@ -78,6 +78,12 @@ class FakeUserDB:
         self.digest_sends: Dict[tuple, Dict[str, Any]] = {}
         self._strategy_seq = 0
         self.lock_held = False
+        # Day 12: entitlements. Grandfather slots issued (never decremented,
+        # like app_counters) and metered usage by (user_id, period, kind).
+        # Tests that need a FREE account exhaust the slots first:
+        # ``db.grandfather_issued = GRANDFATHER_LIMIT``.
+        self.grandfather_issued = 0
+        self.usage: Dict[tuple, int] = {}
         self._next_id = 1
 
     def _store(
@@ -112,8 +118,18 @@ class FakeUserDB:
             "google_sub": None,
             # Day 10 opt-out — real rows default TRUE.
             "weekly_digest": True,
+            # Day 12 plan state — real rows carry these columns.
+            "plan_pending": None,
+            "plan_change_at": None,
+            "plan_change_reason": None,
+            "grandfathered_pro": False,
             "created_at": "2026-07-31T00:00:00Z",
         }
+        from src.entitlements import GRANDFATHER_LIMIT
+
+        if self.grandfather_issued < GRANDFATHER_LIMIT:
+            self.grandfather_issued += 1
+            user["grandfathered_pro"] = True
         self._next_id += 1
         self._users[email] = user
         return user
@@ -179,10 +195,29 @@ class FakeUserDB:
     # ── Admin dashboard methods ───────────────────────────────────────
 
     def set_user_plan(self, user_id: int, plan: str) -> None:
-        for user in self._users.values():
-            if user["id"] == user_id:
-                user["plan"] = plan
-                return
+        self.set_plan_state(user_id, plan=plan, pending=None, change_at=None, reason=None)
+
+    # ── Entitlements (Day 12) — mirrors PostgresDB ────────────────────
+    def set_plan_state(self, user_id: int, *, plan, pending, change_at, reason) -> bool:
+        user = self.get_user_by_id(user_id)
+        if not user:
+            return False
+        user.update({"plan": plan, "plan_pending": pending, "plan_change_at": change_at,
+                     "plan_change_reason": reason})
+        return True
+
+    def consume_usage(self, user_id: int, period: str, kind: str, limit) -> Optional[int]:
+        if limit is not None and limit <= 0:
+            return None
+        key = (user_id, period, kind)
+        current = self.usage.get(key, 0)
+        if limit is not None and current >= limit:
+            return None
+        self.usage[key] = current + 1
+        return current + 1
+
+    def get_usage(self, user_id: int, period: str, kind: str) -> int:
+        return self.usage.get((user_id, period, kind), 0)
 
     def set_user_admin(self, user_id: int, is_admin: bool) -> None:
         for user in self._users.values():
@@ -312,6 +347,8 @@ class FakeUserDB:
             del self.strategies[sid]
         for key in [k for k in self.digest_sends if k[0] == user_id]:
             del self.digest_sends[key]
+        for key in [k for k in self.usage if k[0] == user_id]:
+            del self.usage[key]
         jobs = [j for j, row in self.jobs.items() if row["user_email"] == email]
         for job_id in jobs:
             del self.jobs[job_id]
@@ -386,6 +423,9 @@ class FakeUserDB:
         out = []
         for u in sorted(self._users.values(), key=lambda u: u["id"]):
             if not (u.get("weekly_digest", True) and u["email_verified"]):
+                continue
+            # Day 12: same superset prefilter as the SQL.
+            if not (u.get("grandfathered_pro") or u.get("plan", "free") != "free"):
                 continue
             if not self.count_strategies(u["id"]):
                 continue
@@ -505,6 +545,11 @@ class FakeUserDB:
                 "email_verified": u["email_verified"],
                 "is_admin": u["is_admin"],
                 "created_at": u.get("created_at"),
+                # Day 12: the real SELECT carries USER_PLAN_COLUMNS.
+                "plan_pending": u.get("plan_pending"),
+                "plan_change_at": u.get("plan_change_at"),
+                "plan_change_reason": u.get("plan_change_reason"),
+                "grandfathered_pro": u.get("grandfathered_pro", False),
             }
             for u in users[offset: offset + limit]
         ]

@@ -373,8 +373,14 @@ def run_digest(
     links: Callable[[int], Dict[str, str]],
     dry_run: bool = False,
     only_email: Optional[str] = None,
+    entitled: Optional[Callable[[int], bool]] = None,
 ) -> DigestReport:
-    """Run one digest pass. See the module docstring for the guarantees."""
+    """Run one digest pass. See the module docstring for the guarantees.
+
+    ``entitled(user_id)`` — Day 12: monitoring emails are a gated capability,
+    so each user's plan is checked (fresh, right before sending) like the
+    opt-out is. None = everyone is entitled (tests of the send mechanics).
+    """
     report = DigestReport(week=iso_week_key(now))
     with store.digest_lock() as held:
         if not held:
@@ -398,6 +404,9 @@ def run_digest(
                 # Re-read right before sending: an unsubscribe that landed
                 # after the candidate list was built is still honoured.
                 if not store.get_weekly_digest(uid):
+                    report.skipped += 1
+                    continue
+                if entitled is not None and not entitled(uid):
                     report.skipped += 1
                     continue
                 strategies = store.list_strategies(uid)[:MAX_STRATEGIES_PER_EMAIL]
@@ -497,10 +506,16 @@ def run_weekly_digest(*, dry_run: bool = False, only_email: Optional[str] = None
         }
 
     try:
+        def entitled(uid: int) -> bool:
+            from src.entitlements import MONITORING_EMAILS, plan_for
+
+            user = db.get_user_by_id(uid)
+            return bool(user) and plan_for(user).allows(MONITORING_EMAILS)
+
         return run_digest(
             db, send=send_email, evaluate=evaluate, now=datetime.now(timezone.utc),
             max_sends=settings.digest_max_sends_per_run, app_url=settings.app_base_url,
-            links=links, dry_run=dry_run, only_email=only_email,
+            links=links, dry_run=dry_run, only_email=only_email, entitled=entitled,
         )
     finally:
         # Let Neon suspend: nothing stays open after the run.

@@ -148,7 +148,7 @@ export function Features() {
             transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
             className="mt-4 text-4xl font-bold sm:text-5xl"
           >
-            Everything. <span className="text-gradient">Free. Forever.</span>
+            The whole engine. <span className="text-gradient">Free. Forever.</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 14 }}
@@ -156,8 +156,8 @@ export function Features() {
             transition={{ duration: 0.7, delay: 0.1 }}
             className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-text-mid"
           >
-            No tiers, no credits, no paywall. The full specification of what ships in every account
-            — written down, so “free” means something specific.
+            The full specification of what ships in the free account — written down, so “free” means
+            something specific. Pro adds volume and convenience, never accuracy.
           </motion.p>
         </div>
       </section>
@@ -228,9 +228,7 @@ export function Features() {
           </div>
           <div className="flex items-center gap-2 rounded-xl bg-white/[0.05] px-4 py-2.5">
             <Heart className="h-4 w-4 text-grape-soft" aria-hidden="true" />
-            <span className="font-mono text-xs tabular text-text-hi">
-              free forever · no paywall
-            </span>
+            <span className="font-mono text-xs tabular text-text-hi">free plan forever</span>
           </div>
         </motion.div>
       </section>
@@ -245,8 +243,8 @@ export function Features() {
         >
           <h2 className="text-3xl font-bold">The whole spec sheet is your plan.</h2>
           <p className="mx-auto mt-3 max-w-md text-text-mid">
-            Every feature above is in the free account today. No upgrade path exists, because none
-            is needed.
+            Every feature above is in the free account. Pro adds unlimited backtests, CSV export and
+            weekly strategy emails — never better numbers.
           </p>
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" onClick={() => navigate('/signup')}>

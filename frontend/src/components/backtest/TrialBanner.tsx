@@ -37,7 +37,7 @@ export function TrialBanner({ left, exhausted }: TrialBannerProps) {
             </p>
             <p className="text-xs text-text-mid">
               Create a free account to keep going — your results and share links come with you. No
-              card, no paywall.
+              card needed.
             </p>
           </div>
         </div>

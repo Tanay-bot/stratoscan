@@ -31,6 +31,7 @@ import type {
   BacktestRequest,
   BacktestResponse,
   EmailPreferences,
+  Entitlements,
   Explanation,
   LoginRequest,
   NewsArticle,
@@ -290,6 +291,34 @@ export async function backtestJobStatus(jobId: string): Promise<BacktestJobStatu
     )
   }
   return unwrap<BacktestJobStatus>(api.get(`/backtest/async/${encodeURIComponent(jobId)}`))
+}
+
+// ── Entitlements (Day 12) ──────────────────────────────────────────────────
+
+/** The demo build has no account: everything is enabled and nothing counts. */
+const DEMO_ENTITLEMENTS: Entitlements = {
+  plan: 'pro',
+  plan_label: 'Demo',
+  source: 'demo',
+  grandfathered: false,
+  limits: {
+    backtests_per_month: null,
+    saved_strategies: 20,
+    csv_export: true,
+    monitoring_emails: true,
+  },
+  usage: { backtests: 0, saved_strategies: 0 },
+  pending_plan: null,
+  change_at: null,
+  in_grace: false,
+  period: '',
+  resets_at: '',
+}
+
+/** What the signed-in account may do right now — computed per request server-side. */
+export async function getEntitlements(): Promise<Entitlements> {
+  if (DEMO_MODE) return DEMO_ENTITLEMENTS
+  return unwrap<Entitlements>(api.get('/me/entitlements'))
 }
 
 // ── Explain a result (Day 11) ──────────────────────────────────────────────

@@ -29,9 +29,9 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 
 | Auth level | Meaning | Endpoints |
 |---|---|---|
-| `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback`, `/try/session`, `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png`, `/email/unsubscribe` (signed `token` in the query string) |
+| `none` | Public (rate-limited only) | `/screen`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback`, `/try/session`, `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png`, `/email/unsubscribe` (signed `token` in the query string) |
 | `trial` | `X-Anon-Token` from `POST /try/session` (401 without); `/results/*` and `/explain` also accept a Bearer token instead | `/try/backtest`, `/try/backtest/{job_id}`, `/results/share`, `/results/share/{share_id}`, `/results/shares`, `/explain` |
-| `bearer` | Valid JWT required (401 without) | `/try/claim` (plus `X-Anon-Token`), `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal`, `/me/strategies`, `/me/strategies/{strategy_id}`, `/me/email-preferences` |
+| `bearer` | Valid JWT required (401 without) | `/try/claim` (plus `X-Anon-Token`), `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal`, `/me/entitlements`, `/screen/export`, `/me/strategies`, `/me/strategies/{strategy_id}`, `/me/email-preferences` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
 **Login/register flow:**
@@ -208,7 +208,7 @@ multi-factor composite. Response (`ScreenResponse`):
 ### `POST /enrich` — screen + news/sentiment
 `{query, max_stocks?: 10, limit?: 50}` → `{query, screening: ScreenResponse, enrichment: {SYMBOL: {symbol, buzz, company_news_score, sector_news_score, articles: [{headline, source, datetime, sentiment}]}}, stocks_enriched}`.
 
-### `POST /backtest` — backtest a strategy (bearer)
+### `POST /backtest` — backtest a strategy (bearer — counts toward the plan's monthly backtests)
 `{query, top_n?: 5, stop_loss_pct?, take_profit_pct?, trailing_stop_pct?, position_sizing?: "all_in"|"fixed_pct"|"risk_based", position_pct?, risk_per_trade_pct?, allow_short?, max_leverage?, start_date?: "YYYY-MM-DD", end_date?: "YYYY-MM-DD"}`
 
 Response per symbol includes `total_return_pct`, `sharpe_ratio`,
@@ -295,6 +295,35 @@ fallback to the trial identity).
 request's own origin. Share ids are 128-bit random; deleting an account
 deletes its links.
 
+### Plans and entitlements — `GET /me/entitlements` (bearer)
+
+Two plans. Exactly four capabilities differ; everything else — the history, fees and slippage,
+the SPY benchmark, every robustness block, the strategy echo, `/explain`, share pages — is
+identical on both.
+
+| Capability | Free | Pro | Enforced on |
+|---|---|---|---|
+| Backtests per calendar month (UTC) | 50 | unlimited | `POST /backtest`, `POST /backtest/async` (each start counts; a refused call counts nothing) |
+| Saved strategies | 3 | 20 | `POST /me/strategies` |
+| CSV export | — | yes | `POST /backtest/export`, `POST /screen/export` |
+| Weekly strategy email | — | yes | the scheduler's digest (no route) |
+
+A refusal is **403** with the usual envelope plus `upgrade_required` naming the capability:
+`{"error": true, "detail": "CSV export is part of the Pro plan.", "status_code": 403, "upgrade_required": "csv_export"}`.
+Never a price. `GET /me/entitlements` →
+
+```json
+{"plan": "free", "plan_label": "Free", "source": "manual | grandfathered", "grandfathered": false,
+ "limits": {"backtests_per_month": 50, "saved_strategies": 3, "csv_export": false, "monitoring_emails": false},
+ "usage": {"backtests": 4, "saved_strategies": 1}, "period": "2026-10", "resets_at": "2026-11-01T00:00:00+00:00",
+ "pending_plan": null, "change_at": null, "in_grace": false}
+```
+
+Computed on every request (no cache): an admin's plan change shows on the next call. A pending
+downgrade keeps the current plan until `change_at`; `in_grace` marks a revocation's grace period.
+The first 100 accounts are `grandfathered` — Pro for life. The UI may hide a gated button using
+this, but the API is the enforcement.
+
 ### `POST /explain` — a plain-English reading of a finished backtest (bearer or trial)
 
 `{job_id}` → the reading of a finished async job you own (404 otherwise, 409
@@ -373,9 +402,9 @@ Links are built on `SHARE_BASE_URL`; with it unset the digest sends nothing.
 `PUT` replaces the whole document. Backed by the `user_data` table, so a
 user's watchlist and saved screeners follow them across devices.
 
-### `POST /backtest/export` — same pipeline, CSV of closed trades (bearer)
+### `POST /backtest/export` — same pipeline, CSV of closed trades (bearer, Pro — `csv_export`)
 
-### `POST /screen/export` — same pipeline, CSV of results
+### `POST /screen/export` — same pipeline, CSV of results (bearer, Pro — `csv_export`)
 
 ### `GET /stocks` and `GET /stocks/{symbol}` — browse the universe
 `GET /stocks?sector=Technology&limit=50&offset=0` →
@@ -521,7 +550,7 @@ The client renews its token while the user is active (tab focus, and a
 |---|---|---|
 | GET | `/admin/overview` | Dashboard aggregates: uptime, DB health, stock universe, user stats, job monitor, config |
 | GET | `/admin/users?limit&offset&search` | Paginated user list (`{total, limit, offset, users}`) |
-| PATCH | `/admin/users/{id}` | Update `plan` / `is_admin` / `email_verified` (partial) |
+| PATCH | `/admin/users/{id}` | Update `plan` (`free`/`pro`; `plan_change`: `now` default, or `scheduled` = upgrade now / downgrade at period end) / `is_admin` / `email_verified` (partial). Responses show the plan in force plus `grandfathered`, `pending_plan`, `plan_change_at` |
 | GET | `/admin/jobs` | Job-monitor summary |
 | GET | `/admin/events?limit=100` | Latest product events, newest first (`{count, events: [{name, occurred_at, anon_id, user_id, props}]}`) — how the funnel is walked |
 | GET | `/admin/errors?limit=50` | Latest unhandled errors, newest first (`{count, errors: [{occurred_at, method, route, error_type, trace}]}`) — `route` is the route TEMPLATE, `trace` is scrubbed |

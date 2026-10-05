@@ -26,6 +26,7 @@ import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/store/auth'
 import { toast } from '@/store/notifications'
 import { DEMO_MODE } from '@/lib/api/client'
+import { useEntitlements } from '@/store/entitlements'
 import { fmtDate } from '@/lib/utils'
 
 function SecuritySection() {
@@ -154,6 +155,92 @@ function SecuritySection() {
         <Button variant="outline" onClick={() => void onRevokeAll()} loading={revoking}>
           <MonitorX className="h-4 w-4" aria-hidden="true" /> Sign out everywhere
         </Button>
+      </div>
+    </section>
+  )
+}
+
+/** "12 of 50" / "unlimited" — one line of the plan card. */
+function Allowance({ label, used, limit }: { label: string; used: number; limit: number | null }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2 text-sm">
+      <span className="text-text-mid">{label}</span>
+      <span className="font-mono tabular text-text-hi">
+        {limit === null ? `${used} · unlimited` : `${used} of ${limit}`}
+      </span>
+    </div>
+  )
+}
+
+function Included({ label, on }: { label: string; on: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2 text-sm">
+      <span className="text-text-mid">{label}</span>
+      <span className={on ? 'text-gain-soft' : 'text-text-low'}>
+        {on ? 'Included' : 'Pro plan'}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Day 12: the account's real plan — from GET /me/entitlements, the same
+ * decision the API enforces. No prices: see lib/pricing.ts.
+ */
+export function PlanSection() {
+  const ent = useEntitlements()
+  if (!ent) {
+    return (
+      <section className="glass rounded-2xl p-6" aria-label="Plan">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <Sparkles className="h-4 w-4 text-neon" aria-hidden="true" /> Plan
+        </h2>
+        <p className="mt-2 text-sm text-text-low">Loading your plan…</p>
+      </section>
+    )
+  }
+  const resets = ent.resets_at ? fmtDate(ent.resets_at) : ''
+  return (
+    <section className="glass rounded-2xl p-6" aria-label="Plan">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            <Sparkles className="h-4 w-4 text-neon" aria-hidden="true" /> {ent.plan_label} plan
+          </h2>
+          <p className="mt-1 text-sm text-text-mid">
+            {ent.grandfathered
+              ? 'Pro for life — this is one of the first accounts, and that does not expire.'
+              : ent.plan === 'pro'
+                ? 'Every capability, with no monthly backtest limit.'
+                : 'Free forever. The numbers, the robustness checks and the code behind every result are never part of a paid plan.'}
+          </p>
+        </div>
+        {ent.plan === 'free' && (
+          <Link to="/contact" className="text-sm font-medium text-neon hover:underline">
+            Ask about Pro
+          </Link>
+        )}
+      </div>
+      {ent.pending_plan && ent.change_at && (
+        <p className="mt-3 rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-text-mid">
+          {ent.in_grace
+            ? `Pro access continues until ${fmtDate(ent.change_at)}, then this account moves to the ${ent.pending_plan === 'free' ? 'Free' : 'Pro'} plan.`
+            : `Changes to the ${ent.pending_plan === 'free' ? 'Free' : 'Pro'} plan on ${fmtDate(ent.change_at)} — the end of this period.`}
+        </p>
+      )}
+      <div className="mt-3 divide-y divide-white/[0.06]">
+        <Allowance
+          label={`Backtests this month${resets ? ` (resets ${resets})` : ''}`}
+          used={ent.usage.backtests}
+          limit={ent.limits.backtests_per_month}
+        />
+        <Allowance
+          label="Saved strategies"
+          used={ent.usage.saved_strategies}
+          limit={ent.limits.saved_strategies}
+        />
+        <Included label="CSV export" on={ent.limits.csv_export} />
+        <Included label="Weekly emails on saved strategies" on={ent.limits.monitoring_emails} />
       </div>
     </section>
   )
@@ -359,22 +446,8 @@ export function Settings() {
         </div>
       </section>
 
-      {/* Plan */}
-      <section className="glass rounded-2xl p-6" aria-label="Plan">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-base font-semibold">
-              <Sparkles className="h-4 w-4 text-neon" aria-hidden="true" /> Free plan
-            </h2>
-            <p className="mt-1 text-sm text-text-mid">
-              Everything is free — screening, backtesting, news. No paywall, no credits, no limits.
-            </p>
-          </div>
-          <Button variant="secondary" disabled>
-            Current plan
-          </Button>
-        </div>
-      </section>
+      {/* Plan (Day 12) */}
+      {!DEMO_MODE && <PlanSection />}
 
       {!DEMO_MODE && <SecuritySection />}
 

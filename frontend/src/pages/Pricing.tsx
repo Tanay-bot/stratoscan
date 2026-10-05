@@ -5,46 +5,52 @@ import { LandingNav } from '@/components/landing/LandingNav'
 import { Footer } from '@/components/landing/Footer'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { GRANDFATHER_LIMIT, NEVER_GATED, PLANS } from '@/lib/plans'
+import { proPrice } from '@/lib/pricing'
 
-const INCLUDED = [
-  'Unlimited natural-language screens',
-  '10 years of backtest history per run',
-  'Monte Carlo + confidence intervals',
-  'Walk-forward validation & SPY benchmark',
-  'News feed with LLM sentiment scoring',
-  'Watchlist, saved screens & backtest history',
-]
+const free = PLANS.free
+const pro = PLANS.pro
 
-const FREE_FEATURES: { label: string; value: string }[] = [
-  { label: 'Screening queries', value: 'Unlimited' },
-  { label: 'Backtest runs', value: '10 / day' },
-  { label: 'History depth', value: '10 years' },
-  { label: 'News sentiment', value: 'Included' },
-  { label: 'API access', value: 'Full REST' },
-  { label: 'Price', value: '$0 forever' },
+const PLAN_ROWS: { label: string; free: string; pro: string }[] = [
+  { label: 'Screening queries', free: 'Unlimited', pro: 'Unlimited' },
+  {
+    label: 'Backtests',
+    free: `${free.backtestsPerMonth} / month`,
+    pro: pro.backtestsPerMonth === null ? 'Unlimited' : `${pro.backtestsPerMonth} / month`,
+  },
+  {
+    label: 'Saved strategies',
+    free: String(free.savedStrategies),
+    pro: String(pro.savedStrategies),
+  },
+  { label: 'CSV export', free: '—', pro: 'Included' },
+  { label: 'Weekly strategy emails', free: '—', pro: 'Included' },
+  { label: 'History depth', free: '10 years', pro: '10 years' },
 ]
 
 const FAQS = [
   {
-    q: 'Is it really free?',
-    a: 'Yes. Stratoscan has no paid tier and no plans for one. No credits, no trials, no “upgrade to unlock” — free is the plan, not a promotion.',
+    q: 'Is the free plan really free?',
+    a: `Yes, and it stays free: unlimited screens, ${free.backtestsPerMonth} backtests a month with the full 10 years of history, and every robustness check on every result. No card, no trial clock.`,
   },
   {
-    q: 'Why 10 backtests per day?',
-    a: 'Each backtest replays years of history across thousands of simulated trades. The daily cap keeps results fast for everyone — not because we charge for more.',
+    q: 'What will never be part of a paid plan?',
+    a: 'Anything that makes a number trustworthy: the full history, fees and slippage, the SPY benchmark, Monte Carlo and walk-forward checks, the exact rules and code behind each result, and the plain-English reading of it. A product that sells trust in tiers is selling something else.',
   },
   {
-    q: 'What is in the full version?',
-    a: 'There is no full version. Every feature ships to every account: Monte Carlo, walk-forward validation, sentiment, exports — all included.',
+    q: 'What does Pro add?',
+    a: 'Volume and convenience: unlimited backtests, more saved strategies, CSV export, and a weekly email on how your saved strategies have done.',
   },
   {
-    q: 'How do you make money?',
-    a: 'Being free is the strategy. We built Stratoscan to stay fast and generous for everyone — and if that ever changes, everything listed on this page stays free.',
+    q: 'How do I get Pro?',
+    a: `The first ${GRANDFATHER_LIMIT} accounts are Pro for life, automatically. After that, Pro is set up by hand for now — get in touch.`,
   },
 ]
 
 export function Pricing() {
   const navigate = useNavigate()
+  // Day 12: no price renders unless the price flag is on (lib/pricing.ts).
+  const price = proPrice()
 
   return (
     <div id="main-content" tabIndex={-1} className="min-h-screen overflow-x-hidden outline-none">
@@ -66,7 +72,7 @@ export function Pricing() {
             animate={{ opacity: 1, y: 0 }}
             className="inline-flex items-center gap-2 rounded-full border border-gain/25 bg-gain/10 px-3.5 py-1.5 text-2xs font-semibold uppercase tracking-wider text-gain-soft"
           >
-            <Sparkles className="h-3 w-3" aria-hidden="true" /> No paywall. Ever.
+            <Sparkles className="h-3 w-3" aria-hidden="true" /> The numbers are never paywalled
           </motion.p>
           <motion.h1
             initial={{ opacity: 0, y: 18 }}
@@ -74,7 +80,7 @@ export function Pricing() {
             transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
             className="mt-6 text-4xl font-bold sm:text-5xl"
           >
-            One plan. <span className="text-gradient">Zero dollars.</span>
+            Free to start. <span className="text-gradient">Pro for more.</span>
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 14 }}
@@ -82,7 +88,8 @@ export function Pricing() {
             transition={{ duration: 0.7, delay: 0.1 }}
             className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-text-mid"
           >
-            Every feature, for every account, forever. No tiers, no credits, no “upgrade to unlock”.
+            Every result, on every plan, comes with the same history, the same checks and the same
+            honesty. Pro adds volume and convenience — never accuracy.
           </motion.p>
         </div>
       </section>
@@ -101,26 +108,26 @@ export function Pricing() {
             aria-hidden="true"
           />
 
-          <div className="relative grid gap-0 md:grid-cols-[1.2fr_1fr]">
-            {/* Left: plan */}
+          <div className="relative grid gap-0 md:grid-cols-2">
+            {/* Free */}
             <div className="p-8 sm:p-10">
               <div className="flex items-center gap-3">
                 <h2 className="text-2xl font-bold">Free</h2>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-neon/25 bg-neon/10 px-3 py-1 text-2xs font-semibold text-neon">
-                  <Heart className="h-3 w-3" aria-hidden="true" /> The only plan
+                  <Heart className="h-3 w-3" aria-hidden="true" /> Free forever
                 </span>
               </div>
-              <div className="mt-5 flex items-end gap-2">
-                <span className="font-mono text-6xl font-bold tabular text-text-hi">$0</span>
-                <span className="pb-2 text-sm text-text-low">/ forever</span>
-              </div>
               <p className="mt-4 max-w-sm text-sm leading-relaxed text-text-mid">
-                Everything the terminal does — screening, backtesting, sentiment, exports. The full
-                product, with the full history depth.
+                The full product on real data, with every check on every result.
               </p>
-
-              <div className="mt-6 space-y-3">
-                {INCLUDED.map((f) => (
+              <Button size="lg" className="mt-6 w-full" onClick={() => navigate('/signup')}>
+                Start for free <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Button>
+              <p className="mt-8 text-2xs font-semibold uppercase tracking-wider text-text-low">
+                Never paywalled, on any plan
+              </p>
+              <div className="mt-4 space-y-3">
+                {NEVER_GATED.map((f) => (
                   <div key={f} className="flex items-start gap-3 text-sm text-text-hi">
                     <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gain/15">
                       <Check className="h-3 w-3 text-gain-soft" aria-hidden="true" />
@@ -129,46 +136,70 @@ export function Pricing() {
                   </div>
                 ))}
               </div>
-
-              <Button size="lg" className="mt-8 w-full" onClick={() => navigate('/signup')}>
-                Start for free <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Button>
             </div>
 
-            {/* Right: spec table */}
+            {/* Side by side */}
             <div className="border-t border-white/[0.08] bg-ink-deep/40 p-8 sm:p-10 md:border-l md:border-t-0">
-              <p className="text-2xs font-semibold uppercase tracking-wider text-text-low">
-                What you get
-              </p>
-              <dl className="mt-5 space-y-4">
-                {FREE_FEATURES.map((f) => (
-                  <div key={f.label} className="flex items-center justify-between gap-4">
-                    <dt className="text-sm text-text-mid">{f.label}</dt>
-                    <dd className="flex items-center gap-1.5 font-mono text-sm font-semibold tabular text-text-hi">
-                      {f.value === '$0 forever' ? (
-                        <>
-                          <Gem className="h-3.5 w-3.5 text-neon" aria-hidden="true" /> $0 forever
-                        </>
-                      ) : f.value === 'Unlimited' ? (
-                        <>
-                          <InfinityIcon className="h-3.5 w-3.5 text-gain-soft" aria-hidden="true" />{' '}
-                          Unlimited
-                        </>
-                      ) : (
-                        f.value
-                      )}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-2xs font-semibold uppercase tracking-wider text-text-low">
+                  Free and Pro
+                </p>
+                {price ? (
+                  <span className="font-mono text-sm font-semibold tabular text-text-hi">
+                    Pro {price}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-2xs font-medium text-grape-soft">
+                    <Gem className="h-3 w-3" aria-hidden="true" /> Pro by invitation for now
+                  </span>
+                )}
+              </div>
+              <table className="mt-5 w-full text-sm">
+                <thead>
+                  <tr className="text-left text-2xs uppercase tracking-wider text-text-low">
+                    <th scope="col" className="pb-2 font-semibold">
+                      <span className="sr-only">Capability</span>
+                    </th>
+                    <th scope="col" className="pb-2 font-semibold">
+                      Free
+                    </th>
+                    <th scope="col" className="pb-2 font-semibold">
+                      Pro
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.06]">
+                  {PLAN_ROWS.map((r) => (
+                    <tr key={r.label}>
+                      <th scope="row" className="py-2.5 pr-3 text-left font-normal text-text-mid">
+                        {r.label}
+                      </th>
+                      <td className="py-2.5 pr-3 font-mono tabular text-text-hi">
+                        {r.free === 'Unlimited' ? (
+                          <span className="inline-flex items-center gap-1">
+                            <InfinityIcon
+                              className="h-3.5 w-3.5 text-gain-soft"
+                              aria-hidden="true"
+                            />
+                            Unlimited
+                          </span>
+                        ) : (
+                          r.free
+                        )}
+                      </td>
+                      <td className="py-2.5 font-mono tabular text-text-hi">{r.pro}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
 
               <div className="mt-8 rounded-xl border border-gain/20 bg-gain/[0.06] p-4">
                 <p className="flex items-center gap-2 text-xs font-semibold text-gain-soft">
                   <Heart className="h-3.5 w-3.5" aria-hidden="true" /> Honest pricing note
                 </p>
                 <p className="mt-1.5 text-xs leading-relaxed text-text-mid">
-                  If a paid tier ever exists, everything listed here stays free. We’d rather earn
-                  your trust than your credit card.
+                  The first {GRANDFATHER_LIMIT} accounts are Pro for life. Whatever Pro costs later,
+                  nothing in the left-hand list will ever be part of it.
                 </p>
               </div>
             </div>

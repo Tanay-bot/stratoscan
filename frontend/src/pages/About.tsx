@@ -15,7 +15,7 @@ const PILLARS = [
   {
     icon: Timer,
     title: 'Free is the architecture',
-    body: 'There is no paywall because there was never meant to be one. Free isn’t a trial or a teaser — it’s the product itself.',
+    body: 'The numbers are never behind a paywall: the full history, every robustness check and the code behind each result come with the free plan. Free isn’t a trial or a teaser — it’s the product itself.',
   },
   {
     icon: Cpu,
@@ -30,7 +30,7 @@ const PILLARS = [
 ]
 
 const FACTS: { target: number; suffix: string; label: string }[] = [
-  { target: 100, suffix: '%', label: 'free — no paywall' },
+  { target: 100, suffix: '%', label: 'of the numbers, free' },
   { target: 1400, suffix: '+', label: 'US stocks in the universe' },
   { target: 10, suffix: 'y', label: 'of backtest history' },
   { target: 24, suffix: '/7', label: 'market coverage' },

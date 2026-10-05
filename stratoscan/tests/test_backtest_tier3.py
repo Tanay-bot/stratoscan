@@ -161,8 +161,11 @@ with mock.patch("src.interpreter.interpret_query", return_value=_FakeInterpreted
         req.headers = {}
         resp = AsyncMock()
 
-        # POST /backtest/async — returns immediately with a job_id.
-        started = await backtest_async(req, resp, payload, user)
+        # POST /backtest/async — returns immediately with a job_id. The
+        # entitlement charge (Day 12) needs a real account row; it has its own
+        # suite (test_entitlements), so it is a no-op here.
+        with mock.patch("src.api._charge_backtest"):
+            started = await backtest_async(req, resp, payload, user)
         job_id = started["job_id"]
         assert job_id and started["status"] == "queued"
         assert started["total_symbols"] == 2

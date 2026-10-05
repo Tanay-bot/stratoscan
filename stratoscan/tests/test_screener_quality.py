@@ -286,8 +286,12 @@ r = client.post("/screen", json={
 assert r.json()["results"][0]["symbol"] == "AAPL", "ascending sort wrong"
 print("✅ /screen sort_desc=False → ascending")
 
-# CSV export
-r = client.post("/screen/export", json={"query": "tech stocks", "limit": 5})
+# CSV export — gated to entitled accounts since Day 12 (tests/test_entitlements
+# covers the gate itself); here an entitled account is stood in.
+assert client.post("/screen/export", json={"query": "tech stocks", "limit": 5}).status_code == 401
+with mock.patch("src.api.get_current_user", return_value={"id": 1, "email": "q@x.test", "plan": "pro"}), \
+        mock.patch("src.api._check_entitlement"):
+    r = client.post("/screen/export", json={"query": "tech stocks", "limit": 5})
 assert r.status_code == 200, f"csv: {r.status_code} {r.text[:200]}"
 assert r.headers["content-type"].startswith("text/csv"), r.headers["content-type"]
 rows = list(csv.DictReader(io.StringIO(r.text)))

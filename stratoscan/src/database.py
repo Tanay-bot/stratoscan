@@ -743,6 +743,46 @@ USERS_WEEKLY_DIGEST_BACKFILL = [
 ]
 
 MAX_SAVED_STRATEGIES = 20
+
+# Day 12 — entitlements. The plan state lives on the user row (read by
+# src.entitlements.plan_for on every request — no cache): ``plan`` now,
+# ``plan_pending`` from ``plan_change_at`` (a period-end downgrade or a
+# grace-period revocation, per ``plan_change_reason``), and the permanent
+# ``grandfathered_pro`` flag for the first accounts.
+USERS_PLAN_BACKFILL = [
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_pending TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_change_at TIMESTAMPTZ",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_change_reason TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS grandfathered_pro BOOLEAN NOT NULL DEFAULT FALSE",
+]
+
+# Counters that must never go backwards. ``grandfathered_pro`` counts slots
+# ISSUED (not accounts that still exist), so deleting an early account never
+# frees a slot for a later one: exactly the first N accounts, ever.
+APP_COUNTERS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS app_counters (
+    name  TEXT PRIMARY KEY,
+    value BIGINT NOT NULL DEFAULT 0
+);
+"""
+APP_COUNTERS_SEED = (
+    "INSERT INTO app_counters (name, value) VALUES ('grandfathered_pro', 0) "
+    "ON CONFLICT (name) DO NOTHING"
+)
+
+# Metered usage per account per calendar month (UTC), e.g. backtests.
+USAGE_COUNTERS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS usage_counters (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    period  TEXT NOT NULL,
+    kind    TEXT NOT NULL,
+    count   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, period, kind)
+);
+"""
+
+# Columns every user read carries, so plan_for() can decide from the row.
+USER_PLAN_COLUMNS = "plan_pending, plan_change_at, plan_change_reason, grandfathered_pro"
 DIGEST_MAX_ATTEMPTS = 3
 # pg_advisory_lock key for the digest job ("SSDIGEST" as an int64-ish constant).
 DIGEST_LOCK_KEY = 0x5353444947455354 & 0x7FFFFFFFFFFFFFFF
@@ -789,6 +829,23 @@ def _event_identity_where(
 # ═══════════════════════════════════════════════════════════════════════════════
 # PostgreSQL Client (Screener)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _grant_grandfather(cur: Any, user_id: int) -> bool:
+    """Inside the signup transaction: take a grandfathered-Pro slot if one is
+    left. The counter UPDATE row-locks, so concurrent signups can never issue
+    more than GRANDFATHER_LIMIT; a rolled-back signup returns its slot."""
+    from src.entitlements import GRANDFATHER_LIMIT
+
+    cur.execute(
+        "UPDATE app_counters SET value = value + 1 "
+        "WHERE name = 'grandfathered_pro' AND value < %s RETURNING value",
+        (GRANDFATHER_LIMIT,),
+    )
+    if cur.fetchone() is None:
+        return False
+    cur.execute("UPDATE users SET grandfathered_pro = TRUE WHERE id = %s", (user_id,))
+    return True
+
 
 class PostgresDB:
     """Direct PostgreSQL connection for the stock screener database.
@@ -880,6 +937,7 @@ class PostgresDB:
                     + USERS_PASSWORD_RESET_BACKFILL
                     + USERS_GOOGLE_SUB_BACKFILL
                     + USERS_WEEKLY_DIGEST_BACKFILL
+                    + USERS_PLAN_BACKFILL
                 ):
                     try:
                         cur.execute(stmt)
@@ -913,6 +971,9 @@ class PostgresDB:
                     cur.execute(idx)
                 cur.execute(DIGEST_SENDS_SCHEMA)
                 cur.execute(EXPLANATIONS_SCHEMA)
+                cur.execute(APP_COUNTERS_SCHEMA)
+                cur.execute(APP_COUNTERS_SEED)
+                cur.execute(USAGE_COUNTERS_SCHEMA)
             conn.commit()
         logger.info(
             "PostgreSQL stock_master + users + job monitoring + backtest_jobs "
@@ -971,6 +1032,7 @@ class PostgresDB:
                         ),
                     )
                     user_id = cur.fetchone()[0]
+                    _grant_grandfather(cur, user_id)
                 conn.commit()
             except Exception:
                 # Critical: roll back BEFORE returning the connection to the
@@ -995,7 +1057,7 @@ class PostgresDB:
         """
         sql = """
             SELECT id, email, password_hash, plan, email_verified, is_admin,
-                   token_version, reset_token_expires, created_at
+                   token_version, reset_token_expires, created_at, """ + USER_PLAN_COLUMNS + """
             FROM users WHERE email = %s
         """
         with self._get_conn() as conn:
@@ -1018,7 +1080,7 @@ class PostgresDB:
         """
         sql = """
             SELECT id, email, password_hash, plan, email_verified, is_admin,
-                   token_version, created_at
+                   token_version, created_at, """ + USER_PLAN_COLUMNS + """
             FROM users WHERE id = %s
         """
         with self._get_conn() as conn:
@@ -1032,12 +1094,15 @@ class PostgresDB:
 
         Args:
             user_id: The user's database id.
-            plan: 'free' or 'premium'.
+            plan: 'free' or 'pro'.
         """
+        # An admin's hand: effective now, and it clears any pending change
+        # (src.billing.ManualBillingProvider.set_plan is the same write).
         with self._get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE users SET plan = %s WHERE id = %s",
+                    "UPDATE users SET plan = %s, plan_pending = NULL, plan_change_at = NULL, "
+                    "plan_change_reason = NULL WHERE id = %s",
                     (plan, user_id),
                 )
             conn.commit()
@@ -1066,8 +1131,8 @@ class PostgresDB:
             created_at).
         """
         sql = (
-            "SELECT id, email, plan, email_verified, is_admin, created_at "
-            "FROM users"
+            "SELECT id, email, plan, email_verified, is_admin, created_at, "
+            + USER_PLAN_COLUMNS + " FROM users"
         )
         params: List[Any] = []
         if search:
@@ -1489,6 +1554,7 @@ class PostgresDB:
                 with conn.cursor() as cur:
                     cur.execute(sql, (email.lower().strip(), unusable_hash, sub))
                     user_id = cur.fetchone()[0]
+                    _grant_grandfather(cur, user_id)
                 conn.commit()
             except Exception:
                 # Roll back before the connection goes back to the pool — an
@@ -1655,6 +1721,66 @@ class PostgresDB:
                 raise
         return {"jobs": jobs, "shares": shares}
 
+    # ── Entitlements (Day 12) ──────────────────────────────────────────
+
+    def set_plan_state(
+        self,
+        user_id: int,
+        *,
+        plan: str,
+        pending: Optional[str],
+        change_at: Any,
+        reason: Optional[str],
+    ) -> bool:
+        """The billing provider's one write: the plan now and any pending change."""
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET plan = %s, plan_pending = %s, plan_change_at = %s, "
+                    "plan_change_reason = %s WHERE id = %s",
+                    (plan, pending, change_at, reason, user_id),
+                )
+                updated = cur.rowcount
+            conn.commit()
+        return updated > 0
+
+    def consume_usage(self, user_id: int, period: str, kind: str, limit: Optional[int]) -> Optional[int]:
+        """Atomically count one use if it fits under ``limit``.
+
+        Returns the new count, or None when the account is already at its
+        limit (nothing is counted). Atomic in one statement, so two requests
+        racing for the last slot cannot both get it. ``limit`` None =
+        unlimited (still counted, for the usage display).
+        """
+        if limit is not None and limit <= 0:
+            return None
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO usage_counters (user_id, period, kind, count)
+                    VALUES (%s, %s, %s, 1)
+                    ON CONFLICT (user_id, period, kind) DO UPDATE
+                        SET count = usage_counters.count + 1
+                        WHERE %s::int IS NULL OR usage_counters.count < %s::int
+                    RETURNING count
+                    """,
+                    (user_id, period, kind, limit, limit),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return int(row[0]) if row else None
+
+    def get_usage(self, user_id: int, period: str, kind: str) -> int:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT count FROM usage_counters WHERE user_id = %s AND period = %s AND kind = %s",
+                    (user_id, period, kind),
+                )
+                row = cur.fetchone()
+        return int(row[0]) if row else 0
+
     # ── Explanations (Day 11) ──────────────────────────────────────────
 
     def get_explanation(self, result_hash: str) -> Optional[Dict[str, Any]]:
@@ -1756,6 +1882,12 @@ class PostgresDB:
                     SELECT u.id, u.email
                     FROM users u
                     WHERE u.weekly_digest AND u.email_verified
+                      -- Day 12: monitoring emails are Pro-only. A superset
+                      -- prefilter (a not-yet-applied downgrade still reads
+                      -- as non-free here); plan_for() decides per user, so a
+                      -- queue of free accounts can never crowd out Pro ones
+                      -- under the per-run cap.
+                      AND (u.grandfathered_pro OR u.plan <> 'free')
                       AND EXISTS (SELECT 1 FROM saved_strategies s WHERE s.user_id = u.id)
                       AND NOT EXISTS (
                           SELECT 1 FROM digest_sends d

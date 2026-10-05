@@ -984,10 +984,31 @@ class AdminUserOut(BaseModel):
 
     id: int
     email: str
-    plan: str
+    plan: str  # the tier in force NOW (plan_for), not the raw column
     email_verified: bool = False
     is_admin: bool = False
     created_at: Optional[datetime] = None
+    # Day 12: why the plan is what it is, and any change waiting to apply.
+    grandfathered: bool = False
+    pending_plan: Optional[str] = None
+    plan_change_at: Optional[datetime] = None
+
+
+def _admin_user_out(row: Dict[str, Any]) -> "AdminUserOut":
+    from src.entitlements import plan_for
+
+    ent = plan_for(row)
+    return AdminUserOut(
+        id=row["id"],
+        email=row["email"],
+        plan=ent.plan,
+        email_verified=bool(row.get("email_verified", False)),
+        is_admin=bool(row.get("is_admin", False)),
+        created_at=row.get("created_at"),
+        grandfathered=bool(row.get("grandfathered_pro")),
+        pending_plan=ent.pending_plan,
+        plan_change_at=ent.change_at,
+    )
 
 
 class AdminUsersResponse(BaseModel):
@@ -1003,8 +1024,12 @@ class AdminUserUpdate(BaseModel):
     """Mutable fields an admin can change on a user account."""
 
     plan: Optional[str] = Field(
-        None, pattern="^(free|premium)$", description="free | premium"
+        None, pattern="^(free|pro|premium)$",
+        description="free | pro (premium is the old name for pro)",
     )
+    # Day 12: an admin's change is immediate by default. "scheduled" uses the
+    # billing semantics instead: an upgrade now, a downgrade at period end.
+    plan_change: str = Field("now", pattern="^(now|scheduled)$")
     is_admin: Optional[bool] = None
     email_verified: Optional[bool] = None
 
@@ -1582,7 +1607,7 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
         return "bearer"
     if path.startswith(("/try/backtest", "/results/", "/explain")):
         return "trial"
-    if path.startswith("/backtest"):
+    if path.startswith("/backtest") or path == "/screen/export":
         return "bearer"
     if path in (
         "/auth/me", "/auth/resend-verification", "/auth/logout-all",
@@ -3347,23 +3372,138 @@ def _run_backtest_pipeline(
     return strategy_rules, bt_results, screen_message, portfolio
 
 
+# ── Entitlements (Day 12) ──────────────────────────────────────────────────
+# Every gated route takes ``Depends(gate(FEATURE))`` instead of
+# ``get_current_user``. The dependency resolves the account, asks
+# ``plan_for`` (the ONE entitlement function) and refuses with 403 + an
+# ``upgrade_required`` field. The returned callable carries
+# ``entitlement_feature``, so tests/test_entitlements.py can enumerate every
+# gated route from the app itself: a new gate without a test fails that suite.
+
+
+class EntitlementError(HTTPException):
+    def __init__(self, feature: str, detail: str):
+        super().__init__(status_code=403, detail=detail)
+        self.entitlement_feature = feature
+
+
+def _usage_db():
+    from src.database import PostgresDB
+
+    return PostgresDB()
+
+
+def _refuse(feature: str, ent: Any, used: Optional[int] = None) -> EntitlementError:
+    from src.entitlements import (
+        BACKTESTS, CSV_EXPORT, PLAN_LABELS, SAVED_STRATEGIES, period_end,
+    )
+
+    label = PLAN_LABELS[ent.plan]
+    if feature == BACKTESTS:
+        end = period_end()
+        resets = f"{end:%B} {end.day}"
+        return EntitlementError(feature, (
+            f"You've used all {ent.limit_for(BACKTESTS)} backtests included in your {label} "
+            f"plan this month. They reset on {resets}."
+        ))
+    if feature == SAVED_STRATEGIES:
+        return EntitlementError(feature, (
+            f"Your {label} plan can follow up to {ent.limit_for(SAVED_STRATEGIES)} strategies. "
+            "Stop following one first."
+        ))
+    if feature == CSV_EXPORT:
+        return EntitlementError(feature, "CSV export is part of the Pro plan.")
+    return EntitlementError(feature, "Your plan doesn't include this.")
+
+
+def _check_entitlement(user: Dict[str, Any], feature: str):
+    """Refuse (403) unless ``user``'s plan covers one more use of ``feature``."""
+    from src.entitlements import (
+        BACKTESTS, CSV_EXPORT, MONITORING_EMAILS, SAVED_STRATEGIES, plan_for, usage_period,
+    )
+
+    ent = plan_for(user)
+    if feature in (CSV_EXPORT, MONITORING_EMAILS):
+        if not ent.allows(feature):
+            raise _refuse(feature, ent)
+    elif feature == BACKTESTS:
+        limit = ent.limit_for(BACKTESTS)
+        if limit is not None:
+            used = _usage_db().get_usage(int(user["id"]), usage_period(), BACKTESTS)
+            if used >= limit:
+                raise _refuse(feature, ent, used)
+    elif feature == SAVED_STRATEGIES:
+        if _usage_db().count_strategies(int(user["id"])) >= ent.limit_for(SAVED_STRATEGIES):
+            raise _refuse(feature, ent)
+    else:  # an unknown feature is a programming error — fail closed
+        raise _refuse(feature, ent)
+    return ent
+
+
+def _charge_backtest(user: Dict[str, Any]) -> None:
+    """Count one backtest atomically (the gate's check is advisory; this is
+    authoritative — two requests racing for the last slot cannot both win)."""
+    from src.entitlements import BACKTESTS, plan_for, usage_period
+
+    ent = plan_for(user)
+    if _usage_db().consume_usage(
+        int(user["id"]), usage_period(), BACKTESTS, ent.limit_for(BACKTESTS)
+    ) is None:
+        raise _refuse(BACKTESTS, ent)
+
+
+def gate(feature: str) -> Callable[[Request], Dict[str, Any]]:
+    """FastAPI dependency factory: the signed-in account must be entitled."""
+
+    def _gate(request: Request) -> Dict[str, Any]:
+        user = get_current_user(request)
+        _check_entitlement(user, feature)
+        return user
+
+    _gate.entitlement_feature = feature  # type: ignore[attr-defined]
+    _gate.__name__ = f"gate_{feature}"
+    return _gate
+
+
+@app.get("/me/entitlements", summary="My plan, its limits and this month's usage", tags=["Account"])
+async def my_entitlements(
+    request: Request, response: Response, user: Dict[str, Any] = Depends(get_current_user)
+):
+    """What this account may do right now (computed per request — no cache)."""
+    from src.entitlements import BACKTESTS, period_end, plan_for, usage_period
+
+    ent = plan_for(user)
+    db = _usage_db()
+    uid = int(user["id"])
+    return {
+        **ent.public(),
+        "grandfathered": bool(user.get("grandfathered_pro")),
+        "period": usage_period(),
+        "resets_at": period_end().isoformat(),
+        "usage": {
+            "backtests": db.get_usage(uid, usage_period(), BACKTESTS),
+            "saved_strategies": db.count_strategies(uid),
+        },
+    }
+
+
 @app.post(
     "/backtest",
     response_model=BacktestResponse,
-    summary="Backtest a strategy (free for all authenticated users)",
+    summary="Backtest a strategy (counts toward the plan's monthly backtests)",
     tags=["Backtesting"],
 )
 async def backtest_strategy(
     request: Request,
     response: Response,
     payload: BacktestRequest,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(gate("backtests")),
 ):
     """Backtest a natural language strategy on historical data.
 
-    Free for all authenticated users (the old premium paywall was
-    removed — Stratoscan is fully free). Auth still applies for
-    per-user rate limiting.
+    Counts toward the account's monthly backtests (Day 12 entitlements:
+    Free has a monthly allowance, Pro is unlimited). The result itself is
+    identical on every plan — accuracy and robustness are never gated.
 
     The engine:
     1. Interprets your strategy description into buy/sell rules
@@ -3373,6 +3513,8 @@ async def backtest_strategy(
     5. Calculates Sharpe ratio, max drawdown, win rate
     """
     from src.analytics import track
+
+    _charge_backtest(user)
 
     mode = "sync"
     symbols = _backtest_symbol_count(payload)
@@ -3853,7 +3995,7 @@ async def backtest_async(
     request: Request,
     response: Response,
     payload: BacktestRequest,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(gate("backtests")),
 ):
     """Start a backtest and return a job_id to poll for progress.
 
@@ -3864,6 +4006,7 @@ async def backtest_async(
     per-symbol status; the payload shape on completion is identical to the
     synchronous endpoint.
     """
+    _charge_backtest(user)
     return _start_async_backtest(
         payload,
         owner=user.get("email") or "",
@@ -4380,7 +4523,7 @@ async def save_strategy(
     request: Request,
     response: Response,
     payload: SaveStrategyRequest,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(gate("saved_strategies")),
 ):
     """Snapshot a finished job you own. The weekly digest then reports what
     it would have done since today. Capped at MAX_SAVED_STRATEGIES."""
@@ -4558,7 +4701,7 @@ async def backtest_csv(
     request: Request,
     response: Response,
     payload: BacktestRequest,
-    user: Dict[str, Any] = Depends(get_current_user),
+    user: Dict[str, Any] = Depends(gate("csv_export")),
 ):
     """Backtest a strategy and return the simulated trades as a CSV.
 
@@ -4616,7 +4759,12 @@ async def backtest_csv(
         200: {"content": {"text/csv": {}}, "description": "CSV of screening results"},
     },
 )
-async def screen_csv(request: Request, response: Response, payload: ScreenRequest):
+async def screen_csv(
+    request: Request,
+    response: Response,
+    payload: ScreenRequest,
+    user: Dict[str, Any] = Depends(gate("csv_export")),
+):
     """Screen stocks and return the results as a downloadable CSV.
 
     Same pipeline as ``/screen`` (one LLM call, local DB query) but the
@@ -5272,17 +5420,7 @@ async def admin_users(
         total=total,
         limit=limit,
         offset=offset,
-        users=[
-            AdminUserOut(
-                id=r["id"],
-                email=r["email"],
-                plan=r.get("plan", "free"),
-                email_verified=bool(r.get("email_verified")),
-                is_admin=bool(r.get("is_admin")),
-                created_at=r.get("created_at"),
-            )
-            for r in rows
-        ],
+        users=[_admin_user_out(r) for r in rows],
     )
 
 
@@ -5326,7 +5464,16 @@ async def admin_update_user(
             raise HTTPException(status_code=404, detail=f"User {user_id} not found.")
 
         if payload.plan is not None:
-            db.set_user_plan(user_id, payload.plan)
+            # Through the billing provider — the one place plans change.
+            # "now" (default): an admin's hand, effective on the next
+            # request. "scheduled": upgrade now / downgrade at period end.
+            from src.billing import change_plan, get_billing_provider
+
+            provider = get_billing_provider()
+            if payload.plan_change == "scheduled":
+                change_plan(provider, current, payload.plan)
+            else:
+                provider.set_plan(user_id, payload.plan)
         if payload.is_admin is not None:
             db.set_user_admin(user_id, payload.is_admin)
         if payload.email_verified is True:
@@ -5348,14 +5495,7 @@ async def admin_update_user(
         "Admin %s updated user %d (plan=%s, is_admin=%s, verified=%s)",
         admin.get("email"), user_id, payload.plan, payload.is_admin, payload.email_verified,
     )
-    return AdminUserOut(
-        id=updated["id"],
-        email=updated["email"],
-        plan=updated.get("plan", "free"),
-        email_verified=bool(updated.get("email_verified")),
-        is_admin=bool(updated.get("is_admin")),
-        created_at=updated.get("created_at"),
-    )
+    return _admin_user_out(updated)
 
 
 @app.get(
@@ -5480,14 +5620,24 @@ async def admin_dashboard(request: Request, response: Response):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
-    """Standard JSON error response for HTTP errors."""
+    """Standard JSON error response for HTTP errors.
+
+    A refusal by the entitlement layer (Day 12) also names the capability,
+    ``upgrade_required``, so a client can tell "your plan doesn't include
+    this" from any other 403 without parsing the sentence.
+    """
+    content = {
+        "error": True,
+        "detail": exc.detail,
+        "status_code": exc.status_code,
+    }
+    feature = getattr(exc, "entitlement_feature", None)
+    if feature:
+        content["upgrade_required"] = feature
     return JSONResponse(
         status_code=exc.status_code,
-        content={
-            "error": True,
-            "detail": exc.detail,
-            "status_code": exc.status_code,
-        },
+        content=content,
+        headers=getattr(exc, "headers", None),
     )
 
 

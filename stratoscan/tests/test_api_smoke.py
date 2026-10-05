@@ -65,6 +65,8 @@ expected = {
     "/email/unsubscribe",
     # Day 11: a plain-English reading of a finished result
     "/explain",
+    # Day 12: entitlements
+    "/me/entitlements",
 }
 assert expected == routes, f"Routes mismatch. Missing: {expected - routes}. Extra: {routes - expected}"
 print(f"✅ Routes: {len(routes)} registered — {sorted(routes)}")

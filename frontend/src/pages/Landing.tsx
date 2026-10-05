@@ -301,7 +301,7 @@ export function Landing() {
                 <p className="font-mono text-3xl font-bold tabular text-text-hi">
                   <CountUp target={100} suffix="%" />
                 </p>
-                <p className="mt-1 text-xs text-text-low">free — no paywall</p>
+                <p className="mt-1 text-xs text-text-low">of the numbers, free</p>
               </div>
               <div>
                 <p className="font-mono text-3xl font-bold tabular text-text-hi">
@@ -385,9 +385,12 @@ export function Landing() {
         >
           <div>
             <p className="text-2xs font-semibold uppercase tracking-[0.2em] text-neon">Pricing</p>
-            <h2 className="mt-2 text-2xl font-bold sm:text-3xl">One plan. Zero dollars.</h2>
+            <h2 className="mt-2 text-2xl font-bold sm:text-3xl">
+              Free to start. The numbers are never paywalled.
+            </h2>
             <p className="mt-2 max-w-md text-sm text-text-mid">
-              No tiers, no credits, no paywall. Every feature, for everyone, forever.
+              The full history, every robustness check and the code behind every result — on the
+              free plan, forever. Pro adds volume, not accuracy.
             </p>
           </div>
           <Button size="lg" variant="grape" onClick={() => navigate('/pricing')}>
@@ -413,7 +416,7 @@ export function Landing() {
             Your next idea is one sentence away
           </h2>
           <p className="relative mx-auto mt-4 max-w-md text-text-mid">
-            Describe it once, screen it instantly, backtest it for free. No paywall, no credits, no
+            Describe it once, screen it instantly, backtest it for free. No card, no credits, no
             catch.
           </p>
           <div className="relative mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">

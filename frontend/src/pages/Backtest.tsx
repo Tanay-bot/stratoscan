@@ -43,6 +43,7 @@ import { ChatPanel, type ChatMessage } from '@/components/backtest/ChatPanel'
 import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
 import { ExplainPanel } from '@/components/backtest/ExplainPanel'
+import { useEntitlements, useEntitlementsStore } from '@/store/entitlements'
 import { FollowButton } from '@/components/backtest/FollowButton'
 import { TrialBanner } from '@/components/backtest/TrialBanner'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
@@ -139,6 +140,10 @@ export function Backtest() {
   // Day 6: signed-out visitors run as a free trial; a finished run can be
   // published as a public link (server-built page) and un-published again.
   const signedIn = useAuth((s) => s.token !== null)
+  // Day 12: the plan decides CSV export (the API enforces it; this only
+  // avoids offering a button that will be refused).
+  const entitlements = useEntitlements()
+  const noCsv = entitlements !== null && !entitlements.limits.csv_export
   // Day 9: layers 3–5 collapsed by default, remembered per user.
   const userKey = useAuth((s) => (s.user ? `user:${s.user.id}` : 'guest'))
   const { layers, toggle } = useLayers(userKey)
@@ -233,6 +238,8 @@ export function Backtest() {
           if (status.status === 'done') {
             res = status.result as BacktestResponse
             setLastJobId(started.job_id)
+            // Day 12: a started run spends one of the month's backtests.
+            void useEntitlementsStore.getState().refresh()
             break
           }
           if (status.status === 'error') {
@@ -1037,9 +1044,13 @@ export function Backtest() {
                   }
                 }}
                 loading={exporting}
-                disabled={pending || (!signedIn && !DEMO_MODE)}
+                disabled={pending || (!signedIn && !DEMO_MODE) || noCsv}
                 title={
-                  !signedIn && !DEMO_MODE ? 'Create a free account to export trades' : undefined
+                  !signedIn && !DEMO_MODE
+                    ? 'Create a free account to export trades'
+                    : noCsv
+                      ? 'CSV export is part of the Pro plan'
+                      : undefined
                 }
               >
                 {!exporting && <Download className="h-3.5 w-3.5" aria-hidden="true" />} Export CSV

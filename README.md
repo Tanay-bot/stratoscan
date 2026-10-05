@@ -5,7 +5,7 @@
 > **Owner:** this file is the source of truth for what Stratoscan is, and the entry points for running it.
 > Working in the code → `CLAUDE.md`. HTTP contract → `stratoscan/FRONTEND_API.md`. Deploying → `DEPLOY.md`. Scheduler cadence → `stratoscan/SCHEDULER.md`.
 
-Stratoscan turns plain-English investing ideas into ranked, backtested candidate lists. Type `"find undervalued small-cap tech stocks with rising momentum"` and get real US stocks filtered, scored, and backtested against SPY — no spreadsheets, no query language, no paywall.
+Stratoscan turns plain-English investing ideas into ranked, backtested candidate lists. Type `"find undervalued small-cap tech stocks with rising momentum"` and get real US stocks filtered, scored, and backtested against SPY — no spreadsheets, no query language, and no paywall on the numbers.
 
 ---
 
@@ -24,7 +24,7 @@ Stratoscan turns plain-English investing ideas into ranked, backtested candidate
 | **Admin dashboard** | Self-contained HTML dashboard for operators — users, jobs, health, config warnings. |
 | **Hybrid NL parser** | Deterministic regex/dictionary for exact queries (sub-ms, zero cost), LLM fallback for fuzzy ones. |
 
-**Everything is free.** There is no paywall, no premium tier, no credits. Registration exists only for per-user rate limits.
+**The numbers are never paywalled.** The Free plan — forever — includes unlimited screens, monthly backtests with the full 10-year history, every robustness check and a plain-English reading of every result. Pro adds volume and convenience (unlimited backtests, more saved strategies, CSV export, weekly strategy emails). The first 100 accounts are Pro for life.
 
 ---
 
@@ -603,4 +603,4 @@ Proprietary — see repository access controls.
 
 ---
 
-**Built with 75,000+ lines of code across Python and TypeScript. Free forever. No paywall.**
+**Built with 75,000+ lines of code across Python and TypeScript. Free plan forever; the numbers are never paywalled.**

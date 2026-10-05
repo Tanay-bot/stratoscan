@@ -205,7 +205,7 @@ export function Auth({ mode: initialMode }: { mode: 'login' | 'signup' }) {
               <p className="text-center text-sm text-text-mid">
                 {isLogin
                   ? 'Screen and backtest — free, always.'
-                  : 'Free forever. No paywall, no credits.'}
+                  : 'Free forever. No card, no credits.'}
               </p>
 
               {oauthError && (

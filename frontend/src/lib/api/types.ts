@@ -173,6 +173,27 @@ export interface Explanation {
   facts: Record<string, unknown>
 }
 
+/** Day 12: what this account may do right now (GET /me/entitlements). */
+export interface Entitlements {
+  plan: 'free' | 'pro'
+  plan_label: string
+  /** "grandfathered" (Pro for life) or the billing provider's name. */
+  source: string
+  grandfathered: boolean
+  limits: {
+    backtests_per_month: number | null
+    saved_strategies: number
+    csv_export: boolean
+    monitoring_emails: boolean
+  }
+  usage: { backtests: number; saved_strategies: number }
+  pending_plan: 'free' | 'pro' | null
+  change_at: string | null
+  in_grace: boolean
+  period: string
+  resets_at: string
+}
+
 export interface EmailPreferences {
   weekly_digest: boolean
   email_verified: boolean

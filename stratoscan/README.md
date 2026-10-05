@@ -9,7 +9,7 @@
 
 Turn a plain-English investment idea into a ranked list of real US stocks —
 then backtest the strategy on 10 years of history before you commit a
-single dollar. **Everything is free — no paywall.**
+single dollar. **The free plan is free forever, and the numbers are never paywalled.**
 
 ---
 
@@ -99,7 +99,7 @@ docker run --env-file .env -p 8000:8000 stratoscan
 | POST | `/screen` | — | **Free**: NL query → matching stocks (paginated) |
 | POST | `/interpret` | — | Debug: NL query → extracted filters only |
 | POST | `/enrich` | — | Screen + attach news/sentiment |
-| POST | `/backtest` | JWT | Backtest a strategy (free for all authenticated users) |
+| POST | `/backtest` | JWT | Backtest a strategy (counts toward the plan's monthly backtests) |
 | POST | `/auth/register` | — | Create account (free — auth only for per-user rate limits). New accounts get a verification email (`email_sent` in the response) |
 | POST | `/auth/login` | — | Get JWT (blocked for unverified accounts when `EMAIL_VERIFICATION_REQUIRED=true`) |
 | GET | `/auth/me` | JWT | Current profile |
@@ -123,13 +123,15 @@ frontend build needed). Access is role-gated: an account must have
 `PATCH /admin/users/{id}`. Without `ADMIN_EMAILS` set, every admin
 endpoint returns 403.
 
-### Pricing: free, full stop
+### Plans: Free and Pro — the numbers are never paywalled
 
-There is no paywall. `/screen`, `/enrich`, and `/backtest` are free for
-everyone. Registration (`/auth/register`) exists only to give each user
-per-user rate limits — the backtesting engine requires an authenticated
-JWT, but every account has access. The old Stripe billing layer
-(`/billing/*`, `src/billing.py`) was removed.
+Screening, backtesting with the full 10-year history, every robustness
+check and the explanation of a result are on the Free plan, forever.
+Exactly four things differ (Day 12): backtests per month, saved strategies,
+CSV export and the weekly strategy email — decided by one function,
+`src/entitlements.plan_for(user)`. There is no payment provider yet: an
+admin sets plans by hand, and the first 100 accounts are Pro for life.
+See `BILLING.md`.
 
 ---
 
@@ -278,7 +280,7 @@ stratoscan/
 - [x] NL interpreter (free LLM keys, cost discipline)
 - [x] Real-time screener (0 API calls per query)
 - [x] Backtesting engine (free, rule-based strategies)
-- [x] Auth (JWT) — no paywall; everything is free
+- [x] Auth (JWT) + entitlements (Free / Pro, `plan_for`; accuracy never gated)
 - [x] Signup email verification (SendGrid, stdlib-only client, alembic migration)
 - [x] News + sentiment pipeline (dedicated key + separate DB)
 - [x] Rate limits, caching, pagination, configurable timeouts

@@ -5,6 +5,7 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { deleteStrategy, saveStrategy } from '@/lib/api/services'
 import { toApiError } from '@/lib/api/client'
 import { toast } from '@/store/notifications'
+import { useEntitlementsStore } from '@/store/entitlements'
 
 const SIGNUP = '/signup?next=%2Fapp%2Fbacktest'
 
@@ -45,10 +46,15 @@ export function FollowButton({ jobId, signedIn, disabled }: FollowButtonProps) {
     try {
       const s = await saveStrategy(jobId)
       setSavedId(s.id)
+      const store = useEntitlementsStore.getState()
+      const emails = store.data?.limits.monitoring_emails ?? true
       toast.success(
         'Following',
-        'Each week you’ll get an email on how this strategy has done since today. Turn it off in Settings → Email.',
+        emails
+          ? 'Each week you’ll get an email on how this strategy has done since today. Turn it off in Settings → Email.'
+          : 'It’s on your dashboard. Weekly emails about saved strategies are part of the Pro plan.',
       )
+      void store.refresh()
     } catch (err) {
       toast.error('Could not follow', toApiError(err).message)
     } finally {

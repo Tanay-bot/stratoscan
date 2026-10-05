@@ -379,7 +379,9 @@ assert client.delete(f"/me/strategies/{s['id']}", headers=H(tok)).status_code ==
 assert client.delete(f"/me/strategies/{s['id']}", headers=H(tok)).status_code == 404
 for _ in range(MAX_SAVED_STRATEGIES):
     assert client.post("/me/strategies", headers=H(tok), json={"job_id": "bt_done"}).status_code == 200
-assert client.post("/me/strategies", headers=H(tok), json={"job_id": "bt_done"}).status_code == 409
+capped = client.post("/me/strategies", headers=H(tok), json={"job_id": "bt_done"})
+# Day 12: the cap is the plan's (Pro = MAX_SAVED_STRATEGIES), refused by the entitlement gate.
+assert capped.status_code == 403 and capped.json()["upgrade_required"] == "saved_strategies", capped.text
 print(f"✅ owner-only delete; capped at {MAX_SAVED_STRATEGIES} strategies")
 
 assert client.get("/me/email-preferences", headers=H(tok)).json()["weekly_digest"] is True

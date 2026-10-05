@@ -483,14 +483,15 @@ async function loadUsers(dir) {
       tr.innerHTML =
         "<td class='mono'>" + u.id + "</td>" +
         "<td>" + esc(u.email) + "</td>" +
-        "<td><span class='badge " + (u.plan === "premium" ? "cyan" : "gray") + "'>" + esc(u.plan) + "</span></td>" +
+        "<td><span class='badge " + (u.plan === "pro" ? "cyan" : "gray") + "'>" + esc(u.plan) + "</span></td>" +
         "<td><span class='badge " + (u.email_verified ? "green" : "amber") + "'>" + (u.email_verified ? "verified" : "pending") + "</span></td>" +
         "<td><span class='badge " + (u.is_admin ? "cyan" : "gray") + "'>" + (u.is_admin ? "admin" : "user") + "</span></td>" +
         "<td class='muted'>" + (u.created_at ? new Date(u.created_at).toLocaleDateString() : "—") + "</td>" +
         "<td><div class='row-actions'>" +
           (u.is_admin ? "<button class='mini-btn danger' data-act='demote' data-id='" + u.id + "'>Revoke admin</button>"
                       : "<button class='mini-btn' data-act='promote' data-id='" + u.id + "'>Make admin</button>") +
-          "<button class='mini-btn' data-act='premium' data-id='" + u.id + "' " + (u.plan === "premium" ? "disabled" : "") + ">Set premium</button>" +
+          "<button class='mini-btn' data-act='pro' data-id='" + u.id + "' " + (u.plan === "pro" ? "disabled" : "") + ">Set Pro</button>" +
+          "<button class='mini-btn' data-act='free' data-id='" + u.id + "' " + (u.plan === "free" || u.grandfathered ? "disabled" : "") + " title='" + (u.grandfathered ? "Grandfathered: Pro for life" : "Effective on their next request") + "'>Set Free</button>" +
           (u.email_verified ? "" : "<button class='mini-btn warn' data-act='verify' data-id='" + u.id + "'>Mark verified</button>") +
         "</div></td>";
       rows.appendChild(tr);
@@ -509,7 +510,8 @@ document.getElementById("user-rows").addEventListener("click", async (e) => {
   const body = {};
   if (act === "promote") body.is_admin = true;
   if (act === "demote") body.is_admin = false;
-  if (act === "premium") body.plan = "premium";
+  if (act === "pro") body.plan = "pro";
+  if (act === "free") body.plan = "free";
   if (act === "verify") body.email_verified = true;
   try {
     const u = await api.updateUser(id, body);

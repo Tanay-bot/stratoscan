@@ -29,7 +29,7 @@ Stratoscan turns a natural-language investing idea ("find undervalued small-cap 
 
 ## Positioning
 
-The meaningfully different mechanism: a natural-language interpreter (LLM) translates plain-English investing ideas into structured filter criteria, runs them against a pre-fetched local stock universe (zero API calls per screen), and backtests the strategy on 10 years of OHLCV with Monte Carlo, confidence intervals, and benchmark (SPY) comparison. Everything is free — no paywall, no premium tier gating the core loop.
+The meaningfully different mechanism: a natural-language interpreter (LLM) translates plain-English investing ideas into structured filter criteria, runs them against a pre-fetched local stock universe (zero API calls per screen), and backtests the strategy on 10 years of OHLCV with Monte Carlo, confidence intervals, and benchmark (SPY) comparison. The core loop is free forever; Pro only adds volume and convenience, never accuracy.
 
 ## Operating Context
 
@@ -55,7 +55,7 @@ The meaningfully different mechanism: a natural-language interpreter (LLM) trans
 - Visual world (pinned by user): Bloomberg Terminal meets Instagram — glass-morphism / frosted glass throughout, deep indigo/blue `#0a0a0f` background, neon cyan `#00d4ff` primary, purple `#7c3aed` secondary, green for gains, red for losses, Inter or SF Pro Display, bold numbers with light labels.
 - Example query chips (pinned): "find undervalued small-cap tech stocks", "high-dividend energy companies", "momentum breakout stocks".
 - Voice: serious fintech, precise, confident; not hype. README states "not a stock-picking service."
-- Per product docs: Stratoscan is fully free (paywall removed). The frontend must not present pricing/premium gates as real.
+- Plans (Day 12): Free (forever) and Pro. Only volume/convenience is gated (backtests per month, saved strategies, CSV export, weekly emails); accuracy never is. No price is shown until the price flag is on — the frontend must not invent prices or present gates the API does not enforce.
 
 ## Evidence on Hand
 

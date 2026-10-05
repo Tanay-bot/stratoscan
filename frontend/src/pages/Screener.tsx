@@ -20,6 +20,7 @@ import { StockRow } from '@/components/StockRow'
 import { EmptyState } from '@/components/EmptyState'
 import { AdjustmentNotice } from '@/components/screener/AdjustmentNotice'
 import { downloadBlob, exportScreenCsv, screen } from '@/lib/api/services'
+import { useEntitlements } from '@/store/entitlements'
 import { toApiError } from '@/lib/api/client'
 import { track } from '@/lib/analytics'
 import { toast } from '@/store/notifications'
@@ -55,6 +56,9 @@ export function Screener() {
   const [minCap, setMinCap] = useState(0)
   const [onlyUp, setOnlyUp] = useState(false)
   const [exporting, setExporting] = useState(false)
+  // Day 12: CSV export is a Pro capability (enforced by the API).
+  const entitlements = useEntitlements()
+  const noCsv = entitlements !== null && !entitlements.limits.csv_export
   const runId = useRef(0)
   const searchRef = useRegisterSearchInput(1)
   // Global Esc closes the advanced-filters drawer when it's open.
@@ -288,7 +292,8 @@ export function Screener() {
                 variant="outline"
                 className="h-10"
                 loading={exporting}
-                disabled={!data || loading || pending}
+                disabled={!data || loading || pending || noCsv}
+                title={noCsv ? 'CSV export is part of the Pro plan' : undefined}
                 onClick={async () => {
                   setExporting(true)
                   try {

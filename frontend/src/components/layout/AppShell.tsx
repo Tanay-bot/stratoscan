@@ -20,6 +20,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Logo } from '@/components/Logo'
 import { useAuth } from '@/store/auth'
 import { toast } from '@/store/notifications'
+import { useEntitlements } from '@/store/entitlements'
 import { cn } from '@/lib/utils'
 import { useRegisterDismisser, useRegisterSearchInput } from '@/hooks/useKeyboardShortcuts'
 
@@ -33,6 +34,7 @@ const NAV = [
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
+  const entitlements = useEntitlements()
   const navigate = useNavigate()
 
   return (
@@ -104,11 +106,16 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="glass mb-2 rounded-xl p-3.5">
           <p className="text-2xs font-semibold uppercase tracking-wider text-text-low">Plan</p>
           <div className="mt-1 flex items-center justify-between">
-            <span className="text-sm font-semibold capitalize text-text-hi">
-              {user?.plan ?? 'free'}
+            <span className="text-sm font-semibold text-text-hi">
+              {entitlements?.plan_label ?? 'Free'}
             </span>
             <span className="flex items-center gap-1 text-2xs font-medium text-neon">
-              <Star className="h-3 w-3 fill-neon text-neon" aria-hidden="true" /> Free forever
+              <Star className="h-3 w-3 fill-neon text-neon" aria-hidden="true" />{' '}
+              {entitlements?.grandfathered
+                ? 'Pro for life'
+                : entitlements?.plan === 'pro'
+                  ? 'All features'
+                  : 'Free forever'}
             </span>
           </div>
         </div>

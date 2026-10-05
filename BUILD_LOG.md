@@ -3,6 +3,26 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 12 — Entitlements without a payment provider
+
+**Shipped:** two plans, one decision. `plan_for(user)` is the only place that says what an account
+may do; every gated route asks it through one dependency, and a test finds those routes from the
+app itself, so a new gate without a direct-API test fails the build. Exactly four things are gated
+— monthly backtests (Free 50), saved strategies (3 vs 20), CSV export, weekly strategy emails —
+and accuracy never is: a Free backtest is the same result as a Pro one. Upgrades apply at once,
+downgrades at period end, revocations after a 7-day grace; an admin's change applies on the next
+request. The first 100 accounts are Pro for life, issued by a counter that never runs backwards.
+No price appears anywhere until a flag is flipped, and `BILLING.md` lists what a payment adapter
+must add — plus a conformance suite it must pass.
+
+**Broke / found:** the site promised "no tiers, every feature for everyone, no upgrade path" in a
+dozen places — all corrected to what is now true: the free plan is forever, and the numbers are
+never paywalled. The Pricing page itself printed "$0", a price. Screen CSV export was public; it
+now needs an account. The shared database pool raises instead of waiting when more than five
+requests want a connection at once — found while racing 50 concurrent charges; left for its own
+change. Free's backtests went from "10 a day" (a rate limit) to 50 a month (an allowance) — the
+per-IP rate limits still apply on top.
+
 ## Day 11 — Explain the result, don't just return it
 
 **Shipped:** every backtest now gets a "What happened" reading. Plain-English findings come
