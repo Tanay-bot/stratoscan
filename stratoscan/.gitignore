@@ -25,3 +25,4 @@ data/*.db-shm
 
 # Release-gate markdown report (generated — never commit)
 release-gate-report.md
+data/*.jsonl

@@ -97,6 +97,8 @@ assert f["rules"]["buy_rules"] == ["rsi < 35"]
 multi = stored(TREND, {"AAA": prices(4, 0.0006), "BBB": prices(5, -0.0002)})
 fm = ex.extract_facts(multi)
 assert fm["basis"] == "portfolio" and len(fm["per_symbol"]) == 2
+head = ex.findings(fm)[0].text
+assert head.startswith("The 2-stock portfolio"), f"a portfolio reading must name its basis: {head}"
 assert fm["total_return_pct"] == multi["portfolio"]["total_return_pct"]
 print("✅ facts are a whitelist of numbers (no query, email, trade log); portfolio basis when ≥2 symbols")
 
@@ -158,6 +160,15 @@ deep = hand([(0.01, "signal")] * 31, 3.0, dd=-35.0, curve=curve)
 d = [x for x in ex.findings(ex.extract_facts(deep)) if x.code == "deep_drawdown"]
 assert d and "had not recovered" in d[0].text
 assert ex.findings(ex.extract_facts({"results": {}}))[0].code == "no_result"
+# A steadily rising account sampled every ~8 days (peaks fall between samples)
+# was read as "below its peak for 90 months" before Day 13 — never again.
+rise = [{"date": str((pd.Timestamp("2016-01-04") + pd.Timedelta(days=12 * i)).date()),
+         "value": 100000 * (1.0004 ** (8 * i)) * (0.995 if i % 2 else 1.0)} for i in range(300)]
+months, recovered = ex._drawdown_duration(rise, [{"date": r["date"], "value": -0.004} for r in rise])
+assert months == 0 and recovered is True, (months, recovered)
+crash = rise[:100] + [{"date": r["date"], "value": rise[99]["value"] * 0.7} for r in rise[100:200]]
+months, recovered = ex._drawdown_duration(crash, [])
+assert 35 <= months <= 41 and recovered is False, (months, recovered)
 print("✅ luck (two trades), fitting (IS vs OOS), fragility, few trades and deep drawdowns are named")
 
 # ═══════════════════════════════════════════════════════════════════════════

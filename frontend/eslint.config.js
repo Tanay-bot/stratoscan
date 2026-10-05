@@ -13,7 +13,7 @@ import prettier from 'eslint-config-prettier'
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'node_modules', '*.tsbuildinfo', 'verify_*.mjs'],
+    ignores: ['dist', 'dist-e2e', 'playwright-report', 'test-results', 'node_modules', '*.tsbuildinfo', 'verify_*.mjs'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

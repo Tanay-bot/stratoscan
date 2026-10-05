@@ -286,7 +286,10 @@ function SensitivityBlock({ ps }: { ps: ParameterSensitivityResult }) {
                   const isBest = best && cell.rsi === best.rsi && cell.sma === best.sma
                   const isWorst = worst && cell.rsi === worst.rsi && cell.sma === worst.sma
                   const v = cell.total_return
-                  const pct = (Math.abs(v) / maxAbs) * 100
+                  // 0..1 of the largest move. (Was 0..100, which drove the tint's
+                  // alpha past 1: solid green/red behind green/red text — axe
+                  // measured the contrast failure in the Day 13 sweep.)
+                  const share = Math.abs(v) / maxAbs
                   return (
                     <td
                       key={s}
@@ -299,8 +302,8 @@ function SensitivityBlock({ ps }: { ps: ParameterSensitivityResult }) {
                       style={{
                         background:
                           v >= 0
-                            ? `rgba(22,199,132,${0.04 + pct * 0.2})`
-                            : `rgba(234,57,67,${0.04 + pct * 0.2})`,
+                            ? `rgba(22,199,132,${0.04 + share * 0.16})`
+                            : `rgba(234,57,67,${0.04 + share * 0.16})`,
                       }}
                       title={`RSI ${r} · SMA ${s}: ${fmtPct(v * 100, 1)}`}
                     >

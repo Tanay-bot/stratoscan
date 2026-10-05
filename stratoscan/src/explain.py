@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Bump when the prompt, the facts or the findings change: cached readings
 # made under the old version are then never served for new results.
-PROMPT_VERSION = "explain-v1"
+PROMPT_VERSION = "explain-v2"
 
 DISCLAIMER = (
     "A description of a simulation on historical data, including fees and "
@@ -176,13 +176,19 @@ def _trade_stats(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _drawdown_duration(curve: Any) -> Tuple[Optional[float], Optional[bool]]:
-    """Longest stretch below a previous peak, in months, and whether the
-    deepest drawdown had recovered by the end. The curve is downsampled
-    (≤ 300 points), so this is approximate — rounded to whole months."""
+# A point within this fraction of its running peak counts as AT the peak.
+# The curves are downsampled (≤ 300 points over ten years, ~8 trading days
+# apart), so the day of a new high is usually not a sample; with a zero
+# tolerance nearly every sample sat a hair under an unsampled peak and a
+# steadily rising account read as "below its peak for 90 months" (found by
+# the Day 13 end-to-end run).
+UNDERWATER_TOLERANCE = 0.01
+
+
+def _dated(curve: Any) -> List[Tuple[date, float]]:
+    pts: List[Tuple[date, float]] = []
     if not isinstance(curve, list):
-        return None, None
-    pts = []
+        return pts
     for p in curve:
         if isinstance(p, dict) and isinstance(p.get("date"), str):
             v = _num(p.get("value"), 6)
@@ -191,18 +197,38 @@ def _drawdown_duration(curve: Any) -> Tuple[Optional[float], Optional[bool]]:
                     pts.append((date.fromisoformat(p["date"][:10]), v))
                 except ValueError:
                     continue
-    if len(pts) < 2:
-        return None, None
+    return pts
+
+
+def _drawdown_duration(equity: Any, drawdown: Any) -> Tuple[Optional[float], Optional[bool]]:
+    """Longest stretch more than 1% below a previous peak, in whole months,
+    and whether the account was back within 1% of its peak at the end.
+
+    Measured on the sampled EQUITY curve against its own running peak (so a
+    peak and the dip after it are judged on the same samples); the drawdown
+    curve is the fallback when no equity curve is long enough.
+    """
+    eq = _dated(equity)
+    if len(eq) >= 20:
+        under: List[Tuple[date, bool]] = []
+        peak = eq[0][1]
+        for d, v in eq:
+            peak = max(peak, v)
+            under.append((d, peak > 0 and v < peak * (1 - UNDERWATER_TOLERANCE)))
+    else:
+        dd = _dated(drawdown)
+        if len(dd) < 2:
+            return None, None
+        under = [(d, v < -UNDERWATER_TOLERANCE) for d, v in dd]
     longest = 0
     start: Optional[date] = None
-    for d, v in pts:
-        if v < -1e-9:
+    for d, is_under in under:
+        if is_under:
             start = start or d
             longest = max(longest, (d - start).days)
         else:
             start = None
-    recovered = pts[-1][1] >= -1e-9
-    return round(longest / 30.44), recovered
+    return round(longest / 30.44), not under[-1][1]
 
 
 def _walk_forward(items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -265,7 +291,7 @@ def extract_facts(result: Dict[str, Any]) -> Dict[str, Any]:
     total_return = _num(top.get("total_return_pct"))
     curve = top.get("equity_curve") if isinstance(top.get("equity_curve"), list) else []
     dates = [p.get("date") for p in curve if isinstance(p, dict) and isinstance(p.get("date"), str)]
-    duration, recovered = _drawdown_duration(top.get("drawdown_curve"))
+    duration, recovered = _drawdown_duration(top.get("equity_curve"), top.get("drawdown_curve"))
     trades = _closed_trades(items)
     strategy = result.get("strategy") if isinstance(result.get("strategy"), dict) else {}
 
@@ -346,11 +372,15 @@ def findings(facts: Dict[str, Any]) -> List[Finding]:
             "The rules never completed a trade over the period, so the return reflects no trading activity.",
         ))
 
-    # Headline.
+    # Headline. Name the basis: on a multi-stock run the figures are the
+    # equal-weighted portfolio's, which is not any single stock's number the
+    # page may be showing next to it (found by the Day 13 end-to-end run).
+    portfolio = facts.get("basis") == "portfolio"
+    subject = f"The {facts.get('symbols_tested')}-stock portfolio" if portfolio else "The strategy"
     if ret < 0:
-        out.append(Finding("lost_money", "caution", f"The strategy lost money: {_p(ret)} over the period."))
+        out.append(Finding("lost_money", "caution", f"{subject} lost money: {_p(ret)} over the period."))
     else:
-        out.append(Finding("made_money", "info", f"The strategy returned {_p(ret)} over the period."))
+        out.append(Finding("made_money", "info", f"{subject} returned {_p(ret)} over the period."))
     if bench is not None and excess is not None:
         if excess < 0:
             out.append(Finding(
@@ -426,7 +456,8 @@ def findings(facts: Dict[str, Any]) -> List[Finding]:
         if shares and min(shares) < FRAGILE_PROB_POSITIVE * 100:
             out.append(Finding(
                 "fragile", "caution",
-                f"Reshuffling the same trades in random order ended positive only {min(shares):.0f}% of the "
+                ("For at least one of the stocks, reshuffling" if portfolio else "Reshuffling")
+                + f" the same trades in random order ended positive only {min(shares):.0f}% of the "
                 "time, so the gain depended on the order the trades happened to come in.",
             ))
 

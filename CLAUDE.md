@@ -43,7 +43,7 @@ Stratoscan is a monorepo with two top-level packages plus CI:
 |---|---|---|
 | `stratoscan/` | Backend: FastAPI REST API, NL interpreter, screener, backtesting engine, scheduler, news pipeline | Python 3.14, FastAPI, psycopg2, pandas/numpy, yfinance, finnhub-python, alembic, schedule |
 | `frontend/` | Frontend: SPA with marketing pages + app shell | React 18, TypeScript (strict), Vite, Tailwind, Zustand, Recharts, Framer Motion, Radix UI |
-| `.github/workflows/` | 4 CI/CD workflows | ci.yml, frontend-ci.yml, deploy.yml, frontend-deploy.yml |
+| `.github/workflows/` | 5 CI/CD workflows | ci.yml, frontend-ci.yml, e2e.yml, deploy.yml, frontend-deploy.yml |
 
 **Product loop:** user types plain English ("find undervalued small-cap tech stocks with rising
 momentum") → an LLM (or a deterministic regex parser) converts it to structured filter criteria
@@ -193,6 +193,8 @@ stratoscan/                          # Backend (Python)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
 ├── verify_*.py              # live behavior probes (release gate; run_probes.py picks the set)
 ├── run_probes.py            # Probe runner against isolated stratoscan_probes DB
+├── e2e_stack.py             # Day 13: throwaway local stack for E2E (seeded Postgres, SMTP sink, API)
+├── load_test.py             # Day 13: concurrency ramp on /screen + /backtest/async (→ LOAD.md)
 ├── accuracy_loop.py         # 30-query accuracy verification loop
 ├── rule_execution_loop.py   # Rule-execution ground-truth tests
 ├── alembic/                 # Migrations (10 versions)
@@ -219,10 +221,11 @@ frontend/                            # Frontend (React + Vite)
 │   ├── store/               # auth.ts, personal.ts, rateLimit.ts, notifications.ts (Zustand)
 │   └── hooks/               # useKeyboardShortcuts, useReducedMotion, useContainerWidth
 ├── public/                  # _headers (CSP), _redirects (SPA fallback)
-├── vite.config.ts, vitest.config.ts, tailwind.config.js
+├── e2e/                     # Day 13: Playwright journeys (anonymous, new account, recovery, tiers) + axe sweep
+├── vite.config.ts, vitest.config.ts, tailwind.config.js, playwright.config.ts
 └── package.json
 
-.github/workflows/           # ci.yml, frontend-ci.yml, deploy.yml, frontend-deploy.yml
+.github/workflows/           # ci.yml, frontend-ci.yml, e2e.yml, deploy.yml, frontend-deploy.yml
 ```
 
 ---
@@ -939,6 +942,10 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
 - 429 body: `{error: true, detail, status_code: 429, retry_after}` + `Retry-After` header +
   `Access-Control-Allow-Origin/Credentials/Expose-Headers` when the origin is allowed.
 - 200 responses carry `ratelimit-limit/remaining/reset`.
+- **Client IP:** `_client_ip()` — the socket peer, unless `CLIENT_IP_HEADER` names a header a
+  trusted proxy sets AND overwrites (`Fly-Client-IP`, set in `fly.toml`). Without it, behind Fly
+  every visitor shared the proxy's bucket. `X-Forwarded-For`/`Forwarded`/`X-Real-IP` are never
+  read (clients forge them; `tests/test_adversarial.py` proves it).
 - `_canonical_ip` collapses IPv4-mapped IPv6 (`::ffff:127.0.0.1` → `127.0.0.1`) so variants
   share one counter.
 - Frontend: `store/rateLimit.ts` holds the 429 countdown (last-wait-wins, auto-retry on
@@ -1059,7 +1066,7 @@ All keys in `stratoscan/.env` (gitignored, chmod 600). Full annotated template:
 | Auth | `JWT_SECRET`, `JWT_EXPIRE_HOURS`, `PASSWORD_MIN_LENGTH` | `openssl rand -hex 32` |
 | Email / links | `SENDGRID_API_KEY`, `EMAIL_FROM_ADDRESS`, `APP_BASE_URL`, `SHARE_BASE_URL` (public API origin for `/r/{id}` links — request origin when unset — and for digest unsubscribe links, where unset = **no digest is sent**), `EMAIL_VERIFICATION_REQUIRED`, `EMAIL_VERIFICATION_TOKEN_TTL_HOURS` | sender must be verified in SendGrid |
 | Admin | `ADMIN_EMAILS` | auto-promoted at register/login |
-| Rate limits | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_BYPASS_IPS`, `REDIS_RATE_LIMIT_ENABLED`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_RATE_LIMIT_TIMEOUT` | read bucket env-configurable; cost shields fixed |
+| Rate limits | `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_DAY`, `RATE_LIMIT_BYPASS_IPS`, `CLIENT_IP_HEADER` (`Fly-Client-IP` on Fly — the real visitor IP; blank = socket peer), `REDIS_RATE_LIMIT_ENABLED`, `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `REDIS_RATE_LIMIT_TIMEOUT` | read bucket env-configurable; cost shields fixed |
 | Caching | `CACHE_ENABLED`, `INTERPRET_CACHE_TTL`, `INTERPRET_CACHE_MAX_ENTRIES`, `SCREEN_CACHE_TTL`, `SCREEN_CACHE_MAX_ENTRIES` | |
 | CORS | `CORS_ALLOW_ORIGINS` | comma-separated; locked down (no wildcard) |
 | Scheduler/monitor | `JOB_MONITOR_ENABLED`, `JOB_HEARTBEAT_PERSIST_MINUTES`, `BACKTEST_CACHE_WARMER_*`, `NEWS_SYMBOLS_LIMIT`, `NEWS_REFRESH_MINUTES`, `NEWS_LLM_PREFER`, `DIGEST_ENABLED`, `DIGEST_TIME`, `DIGEST_MAX_SENDS_PER_RUN` (60 — SendGrid's free ~100/day is shared with verification/reset mail) | |
@@ -1130,6 +1137,23 @@ pass; writes a markdown report. `scripts/run_release_gate.sh` wraps it. CI gate 
   14,294/14,294 checks passing.
 - `rule_execution_loop.py` — ground-truth rule execution tests.
 
+### Adversarial, drills, end-to-end, accessibility, load (Day 13)
+
+- `tests/test_adversarial.py` — every guarded route (found from the app) × no token / tampered /
+  alg=none / expired / deleted-account / purpose tokens; IDOR; privilege escalation; injection
+  through the SQL writer AND the interpreter; XSS on share/unsubscribe/admin; rate-limit bypass
+  (forged headers, token cycling, preflight, rolling edge identical in Redis and memory).
+- `tests/test_failure_drills.py` — drills 5–7 (mail down, error capture failing, DB unreachable
+  mid-request → 503 + Retry-After, never 500, never a logout). Drills 1–4: `verify_failure_drills.py`.
+- `tests/test_db_pool.py` — the shared pool waits for a connection instead of failing.
+- **E2E** (`frontend/e2e/`, `npx playwright test`; CI: `e2e.yml` on every push) — four journeys
+  plus an axe-core + keyboard sweep, against `stratoscan/e2e_stack.py`: a throwaway local Postgres
+  (`stratoscan_e2e` / `stratoscan_e2e_bt`, dropped every run) seeded with 12 large caps and 10y of
+  SYNTHETIC prices, an SMTP sink that writes decoded mail to `data/e2e_mail.jsonl` (tests read
+  verification/reset links from it), verification required, rate limiting off, no LLM.
+- **Load** — `python load_test.py` against the E2E stack; results and the free-tier ceiling in
+  `stratoscan/LOAD.md`.
+
 ### Frontend
 
 ```bash
@@ -1147,7 +1171,7 @@ npm run verify:behavior      # E2E behavioral verification (node)
 
 ## 15. CI/CD & deployment
 
-Four GitHub Actions workflows (all on push to `main`; frontend ones also on PRs):
+Five GitHub Actions workflows (push to `main`; frontend ones and e2e also on PRs; e2e on every push):
 
 1. **`ci.yml`** (backend accuracy gate, on backend paths): ruff lint → frozen golden set →
    `verify_backtest_accuracy.py` → `verify_trade_pnl.py` → 6 backtester suites.
@@ -1159,7 +1183,10 @@ Four GitHub Actions workflows (all on push to `main`; frontend ones also on PRs)
    (entrypoint runs `alembic upgrade head` ×5 retry for cold Neon before uvicorn) →
    healthcheck gate (poll `/health` for 200, ~5 min budget) → `fly rollback` on failure.
    Manual trigger: `workflow_dispatch` with `run_release_gate` input.
-4. **`frontend-deploy.yml`** (frontend → Vercel): gate → deploy with `VITE_API_URL` +
+4. **`e2e.yml`** (every push + PR): Postgres service container → backend + frontend deps →
+   `npx playwright install --with-deps chromium` → `npx playwright test` (starts `e2e_stack.py`
+   and a `vite preview` build itself); report + traces uploaded on failure.
+5. **`frontend-deploy.yml`** (frontend → Vercel): gate → deploy with `VITE_API_URL` +
    `VITE_SENTRY_DSN` injection → healthcheck.
 
 **Required GitHub secrets:** `FLY_API_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
@@ -1258,6 +1285,12 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 - **The explanation must never become advice.** Don't loosen `COMPLIANCE_PATTERNS` to let a
   paragraph through, don't pass the model numbers outside `extract_facts`, and don't show a
   `withheld` narrative. Changing the prompt or the facts means bumping `PROMPT_VERSION`.
+- **A database outage is a 503, never a 500 and never a 401.** `generic_exception_handler` maps
+  `OperationalError`/`InterfaceError`/`PoolError` to 503 + `Retry-After`; `auth._fetch_user`
+  raises 503 rather than returning None (None → 401 → the frontend signs the person out). The
+  shared pool WAITS up to `POOL_CHECKOUT_WAIT_SECONDS` for a free connection (psycopg2 itself
+  raises at once). The filter whitelist is enforced in `_build_filter_where` for BOTH sides —
+  don't move it back to the callers.
 - **Never let a digest go out with a dead unsubscribe link** — `run_weekly_digest` refuses
   without `SHARE_BASE_URL`; GET on `/email/unsubscribe` must stay side-effect free (scanners).
   A `'sending'` ledger row is never retried: a missed email beats a duplicate.

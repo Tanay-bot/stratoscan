@@ -969,7 +969,15 @@ export function Backtest() {
                 <p className="mb-2 text-2xs font-semibold uppercase tracking-wider text-text-low">
                   Recent trades
                 </p>
-                <div className="max-h-44 overflow-y-auto rounded-xl border border-white/[0.06]">
+                {/* Scrollable, so it must be reachable by keyboard (axe:
+                    scrollable-region-focusable). */}
+                <div
+                  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+                  tabIndex={0}
+                  role="region"
+                  aria-label="Recent trades (scrollable)"
+                  className="max-h-44 overflow-y-auto rounded-xl border border-white/[0.06]"
+                >
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-ink-panel/95 backdrop-blur">
                       <tr className="text-left text-text-low">

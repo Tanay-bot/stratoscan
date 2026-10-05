@@ -19,7 +19,9 @@
     "capture": "node scripts/capture.mjs",
     "capture:self-test": "node scripts/capture.self-test.mjs",
     "verify:walkforward": "node scripts/verify_walkforward_scale.mjs",
-    "verify:headers": "node scripts/verify_security_headers.mjs"
+    "verify:headers": "node scripts/verify_security_headers.mjs",
+    "build:e2e": "vite build --outDir dist-e2e --emptyOutDir",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.1.1",

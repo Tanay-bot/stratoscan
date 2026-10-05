@@ -1,11 +1,12 @@
 # Stratoscan — Failure-Injection Drills (P1-7)
 
-> **Owner:** this file is the source of truth for the four failure-injection drills and their expected degradation behavior.
+> **Owner:** this file is the source of truth for the seven failure-injection drills and their expected degradation behavior.
 > Probe inventory and gate wiring → `RELEASE_GATE.md`.
 
 Prove the system **degrades gracefully** when upstreams die. Each drill is
 repeatable, documents expected outcomes, and is wired into the release gate as
-a hermetic probe (`verify_failure_drills.py`, probe #7 of the 18).
+a hermetic probe (`verify_failure_drills.py`, probe #8 of the 19). Drills 5–7 (Day 13)
+live in the hermetic suite `tests/test_failure_drills.py`, which every deploy's gate runs.
 
 **Guiding contract:** a dead upstream must produce *retries, logs, and clean
 error surfaces* — never a 500, never corrupted data, never an unhandled
@@ -17,7 +18,8 @@ exception. If any drill fails, the release gate blocks.
 
 ```bash
 cd stratoscan
-/usr/local/bin/python3.14 verify_failure_drills.py   # all 4 drills, hermetic
+/usr/local/bin/python3.14 verify_failure_drills.py   # drills 1–4, hermetic
+python -m tests.test_failure_drills                  # drills 5–7, hermetic
 ```
 
 The drills are **hermetic**: zero network, zero quota burn. Failures are
@@ -157,6 +159,50 @@ account suspension).
 ✅ in-memory backend still enforces the read burst (429s happen) — 60 x 200, 2 x 429 of 62
 DRILL 4: PASS ✅
 ```
+
+---
+
+## Drill 5 — Mail transport down (Day 13)
+
+### Scenario
+SendGrid unreachable (DNS/network/5xx), or the SMTP relay refusing connections.
+
+### Expected outcome
+- `POST /auth/register` → 200 with `email_sent: false` (the account exists; the UI offers "resend").
+- `POST /auth/password-reset/request` → the **same** 200 body for a known and an unknown
+  address — a mail outage must not become an account-existence oracle.
+- `POST /auth/resend-verification` → a clean non-500 status, no transport text.
+- The weekly digest stops after 3 consecutive send failures (circuit breaker,
+  `tests/test_weekly_digest.py`) and retries tomorrow without duplicates.
+
+## Drill 6 — Error capture failing (Day 13)
+
+### Scenario
+The `error_log` insert and the analytics `events` insert both raise (database for
+telemetry unreachable).
+
+### Expected outcome
+- Ordinary requests are unaffected (signup, `/meta` → 200): telemetry never breaks a request.
+- A genuine bug still returns the same generic 500 body
+  (`{"error": true, "detail": "Internal server error. Please try again later.", "status_code": 500}`)
+  — the failed capture adds nothing and leaks nothing.
+
+## Drill 7 — Database unreachable mid-request (Day 13)
+
+### Scenario
+The account loads, then the next query fails: Neon waking from suspend, a dropped
+socket (`OperationalError`, `InterfaceError`) or every pooled connection busy
+(`PoolError`).
+
+### Expected outcome
+- **503 + `Retry-After: 10`**, body "The database is briefly unavailable…" — never 500,
+  never driver text (`generic_exception_handler` → `_is_db_outage`).
+- A failed **account lookup** is 503 too, never a 401: a 401 makes the frontend sign the
+  person out, so a database blip used to log everyone out (`auth._fetch_user`, fixed Day 13).
+- Once the database is back, the same session works — nobody was logged out.
+- A busy pool now **waits** (up to `POOL_CHECKOUT_WAIT_SECONDS`, 15s) for a connection to
+  come back instead of failing at once (`database._get_shared_conn`, `tests/test_db_pool.py`);
+  the load test found 8 concurrent users enough to exhaust it before.
 
 ---
 

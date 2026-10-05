@@ -19,6 +19,7 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
@@ -50,6 +51,17 @@ _pool_lock = threading.Lock()
 _pg_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 _news_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 _backtest_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
+
+# Day 13 load test: psycopg2's pool RAISES "connection pool exhausted" the
+# moment every connection is checked out — it never waits. Eight concurrent
+# users were enough to turn requests into 503s. A checkout that finds the
+# pool full now waits (woken by the next return) up to this many seconds.
+POOL_CHECKOUT_WAIT_SECONDS = 15.0
+_pool_returned = threading.Condition()
+
+
+def _is_exhausted(err: Exception) -> bool:
+    return isinstance(err, psycopg2.pool.PoolError) and "exhausted" in str(err)
 
 
 @contextmanager
@@ -87,6 +99,7 @@ def _get_shared_conn(
     attempts = 0
     max_attempts = 3
     conn = None
+    deadline = time.monotonic() + POOL_CHECKOUT_WAIT_SECONDS
     while True:
         attempts += 1
         try:
@@ -96,7 +109,17 @@ def _get_shared_conn(
             probe.execute("SELECT 1")
             probe.close()
         except (psycopg2.pool.PoolError, psycopg2.InterfaceError,
-                psycopg2.OperationalError):
+                psycopg2.OperationalError) as err:
+            if conn is None and _is_exhausted(err):
+                # Every connection is busy: wait for one to come back rather
+                # than failing the request. Not counted as an attempt.
+                attempts -= 1
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                with _pool_returned:
+                    _pool_returned.wait(timeout=min(remaining, 0.25))
+                continue
             if attempts >= max_attempts:
                 raise
             # Discard the dead conn (closeall already closed it — ignore
@@ -117,6 +140,8 @@ def _get_shared_conn(
         except psycopg2.pool.PoolError:
             # Pool closed mid-flight: closeall already closed this conn.
             pass
+        with _pool_returned:
+            _pool_returned.notify()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Schema Definitions

@@ -31,7 +31,7 @@ export function RiskDisclaimer({ className }: { className?: string }) {
         predict future results. This is not investment advice.{' '}
         <Link
           to="/risk"
-          className="whitespace-nowrap text-neon transition-opacity hover:opacity-80"
+          className="whitespace-nowrap text-neon underline underline-offset-2 transition-opacity hover:opacity-80"
         >
           Read the risk disclaimer
         </Link>

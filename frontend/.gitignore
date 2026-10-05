@@ -14,3 +14,6 @@ npm-debug.log*
 
 # Headless pixel captures (scripts/capture.mjs)
 .captures/
+dist-e2e
+test-results
+playwright-report
