@@ -162,7 +162,14 @@ DRILL 4: PASS ✅
 
 ## Release-gate wiring
 
-`verify_failure_drills.py` is probe **#7** of the 18 probes run by
+**Explain, every LLM provider down (Day 11):** `POST /explain` still answers 200
+with the deterministic findings and `narrative: null`
+(`narrative_status: "unavailable"`); no raw exception text, and nothing is cached
+so the next call tries again. Drilled hermetically in `tests/test_explain.py`
+(router raising) and live in `verify_explain.py` (which fails if EVERY reading is
+unavailable, so a dead provider set cannot pass the gate silently).
+
+`verify_failure_drills.py` is probe **#8** of the 19 probes run by
 `run_probes.py` / `scripts/run_release_gate.sh` against the isolated
 `stratoscan_probes` staging DB. It is hermetic (no network, no quota burn),
 so it runs in every gate pass.

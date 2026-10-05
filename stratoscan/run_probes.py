@@ -55,6 +55,7 @@ PROBES = [
     "verify_backtest_neon_lifecycle.py",
     "verify_data_accuracy.py",
     "verify_derived_fix.py",
+    "verify_explain.py",
     "verify_failure_drills.py",
     "verify_full_backend_behavior.py",
     "verify_llm_router_lifecycle.py",

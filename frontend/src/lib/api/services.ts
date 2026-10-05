@@ -31,6 +31,7 @@ import type {
   BacktestRequest,
   BacktestResponse,
   EmailPreferences,
+  Explanation,
   LoginRequest,
   NewsArticle,
   NewsFeedResponse,
@@ -289,6 +290,19 @@ export async function backtestJobStatus(jobId: string): Promise<BacktestJobStatu
     )
   }
   return unwrap<BacktestJobStatus>(api.get(`/backtest/async/${encodeURIComponent(jobId)}`))
+}
+
+// ── Explain a result (Day 11) ──────────────────────────────────────────────
+
+/**
+ * A plain-English reading of a finished backtest — the account's or this
+ * trial's. Sends only the job id; the server reads its own stored result.
+ * Never advice: descriptive and past tense, guarded server-side.
+ */
+export async function explainResult(jobId: string): Promise<Explanation> {
+  return unwrap<Explanation>(
+    api.post('/explain', { job_id: jobId }, { headers: trialHeaders(), timeout: 90_000 }),
+  )
 }
 
 // ── Saved strategies + the weekly email (Day 10) ───────────────────────────

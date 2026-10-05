@@ -1154,6 +1154,46 @@
         }
       }
     },
+    "/explain": {
+      "post": {
+        "tags": [
+          "Backtesting"
+        ],
+        "summary": "Explain a finished backtest in plain English (descriptive, never advice)",
+        "description": "A reading of what happened in one of YOUR finished backtests.\n\nSends only a job id: the facts are taken from the server's stored result\nby a whitelist. ``findings`` are deterministic and always present;\n``narrative`` is an LLM paragraph over the same facts, shown only when it\npasses the compliance guard and the number guard \u2014 otherwise it is null\nand ``narrative_status`` says why (``unavailable`` or ``withheld``).\nCached by result hash, so one result always gets one reading. A plain\n``def`` on purpose: FastAPI runs it in the threadpool, so the model call\nnever blocks the event loop.",
+        "operationId": "explain_backtest_explain_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/results/share/{share_id}": {
       "delete": {
         "tags": [
@@ -3291,6 +3331,23 @@
         ],
         "title": "EventRequest",
         "description": "A browser-reported analytics event (POST /events).\n\nOnly ``name`` is validated here; the allowlist that actually matters is\n``src.analytics.CLIENT_EVENTS``, applied in the handler so the event\nvocabulary stays in exactly one place."
+      },
+      "ExplainRequest": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 3,
+            "title": "Job Id",
+            "description": "The finished async backtest to explain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "ExplainRequest",
+        "description": "Request body for POST /explain (Day 11)."
       },
       "FilterFieldMeta": {
         "properties": {

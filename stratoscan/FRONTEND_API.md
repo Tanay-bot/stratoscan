@@ -30,7 +30,7 @@ require a JWT, sent as `Authorization: Bearer <token>`.
 | Auth level | Meaning | Endpoints |
 |---|---|---|
 | `none` | Public (rate-limited only) | `/screen`, `/screen/export`, `/interpret`, `/enrich`, `/stocks`, `/news`, `/meta`, `/health`, `/config`, `/auth/register`, `/auth/login`, `/auth/verify-email`, `/auth/google/start`, `/auth/google/callback`, `/try/session`, `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png`, `/email/unsubscribe` (signed `token` in the query string) |
-| `trial` | `X-Anon-Token` from `POST /try/session` (401 without); `/results/*` also accept a Bearer token instead | `/try/backtest`, `/try/backtest/{job_id}`, `/results/share`, `/results/share/{share_id}`, `/results/shares` |
+| `trial` | `X-Anon-Token` from `POST /try/session` (401 without); `/results/*` and `/explain` also accept a Bearer token instead | `/try/backtest`, `/try/backtest/{job_id}`, `/results/share`, `/results/share/{share_id}`, `/results/shares`, `/explain` |
 | `bearer` | Valid JWT required (401 without) | `/try/claim` (plus `X-Anon-Token`), `/backtest`, `/backtest/async`, `/backtest/async/{job_id}`, `/backtest/export`, `/auth/me`, `/auth/resend-verification`, `/auth/logout-all`, `/auth/change-password`, `/auth/delete-account`, `/auth/refresh`, `/me/personal`, `/me/strategies`, `/me/strategies/{strategy_id}`, `/me/email-preferences` |
 | `admin` | JWT + `is_admin=true` (403 otherwise) | `/refresh`, `/ops/*`, `/admin/*` |
 
@@ -295,6 +295,43 @@ fallback to the trial identity).
 request's own origin. Share ids are 128-bit random; deleting an account
 deletes its links.
 
+### `POST /explain` — a plain-English reading of a finished backtest (bearer or trial)
+
+`{job_id}` → the reading of a finished async job you own (404 otherwise, 409
+while it runs, 422 when it matched no stocks). Like sharing, only the job id
+is sent; the numbers come from the server's stored result through a whitelist.
+
+```json
+{
+  "result_hash": "sha256 of the facts + prompt version",
+  "basis": "single | portfolio | none",
+  "findings": [{"code": "lost_money", "tone": "caution", "text": "The strategy lost money: -12.0% over the period."}],
+  "narrative": {"summary": "…", "points": ["…"]},
+  "narrative_status": "ok | unavailable | withheld",
+  "disclaimer": "…not investment advice and says nothing about the future.",
+  "cached": false,
+  "facts": {"total_return_pct": -12.0, "closed_trades": 10, "…": "…"}
+}
+```
+
+- **`findings`** are deterministic and always present — they are the reading
+  even when no model is reachable. Codes: `lost_money`/`made_money`,
+  `lagged_benchmark`/`beat_benchmark`, why it lost (`losers_bigger`,
+  `low_win_rate`, `no_winners`, `few_big_losers`, `stopped_out`), and the
+  uncomfortable ones (`concentrated` — two trades made the profit;
+  `few_trades` — under 30; `fitted` — in-sample gain, out-of-sample loss;
+  `fragile` — reshuffled trades rarely ended positive; `deep_drawdown`;
+  `no_trades`; `no_result`). Render them in order.
+- **`narrative`** is an LLM paragraph over the same facts, shown only when it
+  passes the compliance guard (no recommendation, prediction or "should") and
+  the number guard (every number must be one it was given). Otherwise it is
+  `null` with `narrative_status` `unavailable` (providers down / unparseable —
+  retrying later may succeed) or `withheld` (it failed a guard). Never block
+  the result on it.
+- Cached by `result_hash`: the same result always gets the same reading.
+- Rate limit: own scope `explain` (5/min · 40/day) and global `explain_llm`
+  (300/day) — it cannot spend the screener's budget.
+
 ### Saved strategies + the weekly email — `/me/strategies`, `/me/email-preferences` (bearer)
 
 Following a strategy saves it; once a week its owner gets one email on how it
@@ -531,7 +568,7 @@ Budgets (per scope, from `/meta`): `screen 5/min · 50/day`,
 `interpret 10/min · 100/day`, `enrich 3/min · 20/day`,
 `backtest 2/min · 10/day` (starting a job), `backtest_poll 120/min` (`GET /backtest/async/{job_id}` and `GET /try/backtest/{job_id}` — polling never spends the backtest budget),
 `anon_backtest 2/min · 6/day` (`POST /try/backtest`; per IP, so a fresh trial token does not reset it; the daily cap sits above the 3-run allowance so the friendly 403 comes first),
-`share 10/min · 100/day` (`/results/*`; the public `/r/*` pages are `read`), `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
+`share 10/min · 100/day` (`/results/*`; the public `/r/*` pages are `read`), `explain 5/min · 40/day` (`/explain`, global `explain_llm` 300/day), `refresh 1/min · 10/day`, `read 60/min · 1000/day`,
 `auth 10/min · 50/day`, `register 3/min · 10/day`, `auth_mail 3/min · 10/day`
 (`/auth/password-reset/*`, `/auth/resend-verification`). Global shared buckets additionally cap usage
 across all users (`screener_llm` 900/day, `backtest_llm` 200/day — shared by

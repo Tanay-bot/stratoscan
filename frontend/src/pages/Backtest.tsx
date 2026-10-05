@@ -42,6 +42,7 @@ import { SplitPane } from '@/components/backtest/SplitPane'
 import { ChatPanel, type ChatMessage } from '@/components/backtest/ChatPanel'
 import { RiskDisclaimer } from '@/components/legal/RiskDisclaimer'
 import { CodePanel, type CodeParams } from '@/components/backtest/CodePanel'
+import { ExplainPanel } from '@/components/backtest/ExplainPanel'
 import { FollowButton } from '@/components/backtest/FollowButton'
 import { TrialBanner } from '@/components/backtest/TrialBanner'
 import { TemplatePicker } from '@/components/templates/TemplatePicker'
@@ -789,6 +790,10 @@ export function Backtest() {
               in the same visual block, and not in 8pt grey at the bottom of
               the page — a disclaimer nobody reads is not a disclaimer. */}
           <RiskDisclaimer />
+
+          {/* Day 11: a plain-English reading of this run — findings from the
+              numbers always, a guarded written summary when available. */}
+          {!DEMO_MODE && lastJobId && <ExplainPanel key={lastJobId} jobId={lastJobId} />}
 
           {active && (
             <motion.div

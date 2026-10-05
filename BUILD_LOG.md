@@ -3,6 +3,22 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 11 — Explain the result, don't just return it
+
+**Shipped:** every backtest now gets a "What happened" reading. Plain-English findings come
+straight from the numbers and are always there: why a loser lost (bigger losers than winners, a
+low hit rate, stop-outs, a couple of disasters), and the uncomfortable conclusions said plainly —
+two trades made the profit (luck), the last 30% of history disagreed with the first 70%
+(probably fitted), fewer than 30 trades (not meaningful). A model writes a short summary over the
+same numbers, shown only if it passes two automatic checks: no advice or prediction language (35
+patterns), and no number it was not given. If every provider is down, the findings still show.
+The same result always gets the same reading, even after a restart.
+
+**Broke / found:** the first number guard read the date 2021-06-30 as the numbers 6 and 30, which
+would have let a model invent "lost 6%"; dates now count as their year only, and any percentage
+must be a real figure however small. The compliance list passed a mutation check only after a
+sentence caught by nothing but "will" was added — every earlier example tripped two patterns.
+
 ## Day 10 — A saved strategy writes back
 
 **Shipped:** "Follow weekly" on any finished backtest saves it — the rules the engine actually

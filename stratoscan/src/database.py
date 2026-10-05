@@ -724,6 +724,19 @@ CREATE TABLE IF NOT EXISTS digest_sends (
 );
 """
 
+# Day 11: one plain-English reading per result. Keyed by the hash of the
+# whitelisted facts + prompt version (src.explain.result_hash), so the same
+# backtest never gets two different readings — even across restarts. It
+# holds only model prose over numbers, no user data, so it has no owner and
+# needs no cascade.
+EXPLANATIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS explanations (
+    result_hash TEXT PRIMARY KEY,
+    payload     JSONB NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
 # Opt-out lives on the user: default ON for verified accounts, one-click off.
 USERS_WEEKLY_DIGEST_BACKFILL = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_digest BOOLEAN NOT NULL DEFAULT TRUE",
@@ -899,6 +912,7 @@ class PostgresDB:
                 for idx in SAVED_STRATEGIES_INDEXES:
                     cur.execute(idx)
                 cur.execute(DIGEST_SENDS_SCHEMA)
+                cur.execute(EXPLANATIONS_SCHEMA)
             conn.commit()
         logger.info(
             "PostgreSQL stock_master + users + job monitoring + backtest_jobs "
@@ -1640,6 +1654,28 @@ class PostgresDB:
                 conn.rollback()
                 raise
         return {"jobs": jobs, "shares": shares}
+
+    # ── Explanations (Day 11) ──────────────────────────────────────────
+
+    def get_explanation(self, result_hash: str) -> Optional[Dict[str, Any]]:
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT payload FROM explanations WHERE result_hash = %s", (result_hash,)
+                )
+                row = cur.fetchone()
+        return row[0] if row else None
+
+    def save_explanation(self, result_hash: str, payload: Dict[str, Any]) -> None:
+        """First writer wins: a reading, once stored, is never replaced."""
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO explanations (result_hash, payload) VALUES (%s, %s::jsonb) "
+                    "ON CONFLICT (result_hash) DO NOTHING",
+                    (result_hash, json.dumps(payload)),
+                )
+            conn.commit()
 
     # ── Saved strategies + weekly digest (Day 10) ──────────────────────
 

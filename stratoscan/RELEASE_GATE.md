@@ -4,7 +4,7 @@
 > `run_probes.py` defines what actually runs, and `tests/test_docs_contract.py` fails if the table below drifts from it. Staging setup → `STAGING.md`. Drill detail → `FAILURE_DRILLS.md`.
 
 The release gate is the **last line of defense before any public push**: it
-runs all 18 behavior probes against the isolated staging environment and
+runs all 19 behavior probes against the isolated staging environment and
 **blocks deployment if any probe fails**.
 
 It complements (not replaces) the hermetic CI suite: CI (`.github/workflows/ci.yml`)
@@ -19,7 +19,7 @@ screen-cache, security) that CI deliberately cannot run.
 
 ```bash
 cd stratoscan
-scripts/run_release_gate.sh                # all 18 probes
+scripts/run_release_gate.sh                # all 19 probes
 scripts/run_release_gate.sh --report /tmp/gate.md   # + markdown report
 scripts/run_release_gate.sh --only verify_throughput.py   # one probe
 ```
@@ -39,7 +39,7 @@ probe failed → **deploy is blocked**. **2** = usage/environment error.
 - `verify_screen_cache_live.py` hardcodes port **8099** — the gate refuses to
   run (rather than silently mis-test) if something is squatting on it.
 
-## The 18 probes
+## The 19 probes
 
 | # | Probe | What it verifies |
 |---|---|---|
@@ -49,18 +49,19 @@ probe failed → **deploy is blocked**. **2** = usage/environment error.
 | 4 | `verify_backtest_neon_lifecycle.py` | Full Neon backtest DB lifecycle (schema, write, read, clean) |
 | 5 | `verify_data_accuracy.py` | Stored prices/RSI/SMA/52w vs yfinance on the same as-of date (25 symbols, documented tolerances) |
 | 6 | `verify_derived_fix.py` | Derived fields (RSI/SMA/52w/volume) populate from raw data |
-| 7 | `verify_failure_drills.py` | Failure injection: all Finnhub keys dead, all LLM providers down, yfinance timeout, Upstash down — system degrades gracefully (retries/clean 4xx/in-memory rate limit), never a 500 |
-| 8 | `verify_full_backend_behavior.py` | End-to-end API flow: auth → screen → backtest → news |
-| 9 | `verify_llm_router_lifecycle.py` | LLM router failover, caching, provider rotation |
-| 10 | `verify_load_behavior.py` | Real rate-limit buckets (429s, headers) under load |
-| 11 | `verify_screen_cache_live.py` | Live server screen-cache hit/miss behavior (port 8099) |
-| 12 | `verify_screener_lifecycle.py` | Screener universe refresh → screen → enrich lifecycle |
-| 13 | `verify_scheduler_watchdog.py` | Scheduler watchdog: healthy silent, crash → webhook alert, recovery silent, failed-job alert (real HTTP sink) |
-| 14 | `verify_security_findings.py` | Known-vulnerability patterns absent from the codebase |
-| 15 | `verify_security_fixes_behavior.py` | Security fixes behave correctly at runtime |
-| 16 | `verify_throughput.py` | p99 latency + no 502s under a ~1,200-request bench |
-| 17 | `verify_trade_pnl.py` | Per-trade P&L, fees, and portfolio equity are exact |
-| 18 | `verify_upstash_ratelimit.py` | Upstash/Redis rate-limit backend path |
+| 7 | `verify_explain.py` | Day 11 compliance guard against the REAL model: over 50 varied results every SHOWN narrative passes the advice/prediction regex and the number guard, ≤ 30% withheld, a losing result's reading says it lost (needs LLM keys; fails if every reading is unavailable) |
+| 8 | `verify_failure_drills.py` | Failure injection: all Finnhub keys dead, all LLM providers down, yfinance timeout, Upstash down — system degrades gracefully (retries/clean 4xx/in-memory rate limit), never a 500 |
+| 9 | `verify_full_backend_behavior.py` | End-to-end API flow: auth → screen → backtest → news |
+| 10 | `verify_llm_router_lifecycle.py` | LLM router failover, caching, provider rotation |
+| 11 | `verify_load_behavior.py` | Real rate-limit buckets (429s, headers) under load |
+| 12 | `verify_screen_cache_live.py` | Live server screen-cache hit/miss behavior (port 8099) |
+| 13 | `verify_screener_lifecycle.py` | Screener universe refresh → screen → enrich lifecycle |
+| 14 | `verify_scheduler_watchdog.py` | Scheduler watchdog: healthy silent, crash → webhook alert, recovery silent, failed-job alert (real HTTP sink) |
+| 15 | `verify_security_findings.py` | Known-vulnerability patterns absent from the codebase |
+| 16 | `verify_security_fixes_behavior.py` | Security fixes behave correctly at runtime |
+| 17 | `verify_throughput.py` | p99 latency + no 502s under a ~1,200-request bench |
+| 18 | `verify_trade_pnl.py` | Per-trade P&L, fees, and portfolio equity are exact |
+| 19 | `verify_upstash_ratelimit.py` | Upstash/Redis rate-limit backend path |
 
 ## Report format
 
@@ -72,7 +73,7 @@ With `--report`, the gate writes a self-contained markdown file:
 - **Ran:** 2026-08-06 14:00 UTC
 - **Environment:** staging (isolated stratoscan_probes DB)
 - **Result:** ✅ PASS          (or ❌ FAIL (2/18))
-- **Probes:** 16/18 passed
+- **Probes:** 17/19 passed
 
 | Probe | Exit |
 |---|---|
@@ -127,7 +128,7 @@ before `deploy`:
 
 ## Migration dry-run (P1-6) — separate gate step
 
-Distinct from the 18 probes: before any push, run `alembic upgrade head`
+Distinct from the 19 probes: before any push, run `alembic upgrade head`
 against a **copy of the production database** to prove migrations are safe
 before the container entrypoint runs them against the real DB at boot.
 
@@ -138,7 +139,7 @@ cd stratoscan
 
 Full docs (copy mechanics, safety invariants, known prod state) live in
 `STAGING.md` → "Migration dry-run on a copy of production (P1-6)". The
-dry-run is **not** one of the 18 probes because it needs a faithful copy of
+dry-run is **not** one of the 19 probes because it needs a faithful copy of
 the **production** schema — the probes DB is intentionally throwaway/abused.
 It is a release-blocking step in its own right: if `upgrade head` fails or
 changes any pre-existing table's data on the copy, do not push.

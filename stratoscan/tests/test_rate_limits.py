@@ -59,6 +59,8 @@ assert RATE_LIMITS == {
     "enrich":    {"burst": 3,   "daily": 20,    "weekly": 100},
     "backtest":  {"burst": 2,   "daily": 10,    "weekly": 50},
     "refresh":   {"burst": 1,   "daily": 10,    "weekly": 50},
+    # Day 11: plain-English explanations — one LLM call per (uncached) result.
+    "explain":   {"burst": 5,   "daily": 40,    "weekly": 200},
     # The generic per-IP bucket: env-configurable via RATE_LIMIT_PER_MINUTE /
     # RATE_LIMIT_PER_DAY (defaults 60/min · 1000/day · 5000/week).
     "read":      {"burst": 60,  "daily": 1000,  "weekly": 5000},
@@ -90,6 +92,9 @@ assert GLOBAL_LIMITS == {
     # VULN-002 fix: planet-wide daily cap on account creation — keeps the
     # whole planet under the SendGrid free tier (100/day) with headroom.
     "auth_register": 50,
+    # Day 11: explanations get their OWN planet-wide budget, so they can
+    # never eat the screener's daily LLM allowance.
+    "explain_llm": 300,
 }, f"GLOBAL_LIMITS drifted: {GLOBAL_LIMITS}"
 assert SCOPE_GLOBAL == {
     "screen": "screener_llm",
@@ -102,11 +107,13 @@ assert SCOPE_GLOBAL == {
     "auth_mail": "auth_register",
     # Trials draw on the same planet-wide backtest budget as accounts.
     "anon_backtest": "backtest_llm",
+    "explain": "explain_llm",
 }, f"SCOPE_GLOBAL drifted: {SCOPE_GLOBAL}"
 print("✅ Approved limit numbers locked in test")
 
 # ── 2. Path → bucket mapping ──────────────────────────────────────────────────
 scope_checks = {
+    "/explain": "explain",
     "/screen": "screen",
     "/interpret": "interpret",
     "/enrich": "enrich",

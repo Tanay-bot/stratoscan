@@ -180,6 +180,7 @@ stratoscan/                          # Backend (Python)
 │   ├── share_card.py        # Day 7: 1200×630 PNG preview card (Pillow + assets/fonts, cached by content hash)
 │   ├── strategy_templates.py # Day 8: the 15-template library (served in /meta; mirrored in frontend/src/lib/templates.ts)
 │   ├── digest.py            # Day 10: weekly saved-strategy email (light re-run, honest copy, send guarantees)
+│   ├── explain.py           # Day 11: plain-English reading of a result (facts whitelist, findings, guarded LLM narrative)
 │   └── logging_config.py    # Text/JSON logging setup
 ├── tests/                   # hermetic suites, tests/test_*.py (run: python -m tests.test_<name>)
 │   └── fakes.py             # FakeLLMRouter, FakeUserDB, FakeQualityDB
@@ -342,6 +343,7 @@ marks orphaned async backtest jobs as `interrupted`.
 | DELETE | `/results/share/{share_id}` | Bearer or `X-Anon-Token` | revoke (row deleted; owner-scoped WHERE) |
 | GET | `/results/shares` | Bearer or `X-Anon-Token` | my live links |
 | GET | `/r/{share_id}`, `/r/{share_id}.json`, `/r/{share_id}.png` | — | public share page (server-rendered, noindex, script-free CSP, OG/Twitter card) / JSON / 1200×630 preview card |
+| POST | `/explain` | Bearer or `X-Anon-Token` | Day 11: plain-English reading of an owned finished job — deterministic `findings` + a guarded LLM `narrative` (null when down/withheld); cached by result hash |
 | POST | `/backtest/export` | Bearer | trades → CSV |
 | POST | `/screen/export` | — | screen results → CSV |
 | POST | `/enrich` | — | screen + sentiment |
@@ -682,6 +684,24 @@ a circuit breaker after 3 consecutive send failures, a per-run cap
 [--dry-run] [--user EMAIL]`. Tests: `tests/test_weekly_digest.py` (fake transport + failure
 drills).
 
+### `src/explain.py` — explain the result, don't just return it (Day 11)
+
+`extract_facts(result)` copies a whitelist of numbers (return, SPY, excess, alpha/beta, Sharpe,
+max DD + longest-drawdown months, trade stats incl. profit factor / avg win vs loss / the two
+best trades' share of net profit / exit reasons, walk-forward IS vs OOS, Monte Carlo spread,
+the rules) — never the query, an email or the trade log. `findings(facts)` is deterministic and
+always present: why a loser lost, and the uncomfortable ones (`concentrated`, `few_trades` < 30,
+`fitted`, `fragile`, `deep_drawdown`). `explain_result(result, chat=, cache=)` asks the model
+(temperature 0) for `{summary, points}` and **withholds** it unless it passes
+`compliance_violations` (`COMPLIANCE_PATTERNS`, 35 regexes: should/will/recommend/expect/
+predict/opportunity/upside/…) and `unsupported_numbers` (every number must be a fact; a
+percentage always must; a date contributes only its year). Provider down → findings only,
+`narrative_status: "unavailable"`, never an error. `result_hash` = sha256(facts +
+`PROMPT_VERSION`) keys `ExplanationCache` (memory → main-DB `explanations`, first writer wins),
+so one result gets one reading even across restarts; failed/withheld readings are never cached.
+Tests: `tests/test_explain.py` (50 varied results, failure drill, stability); live:
+`verify_explain.py` (in the release gate — real model, ≤ 30% withheld).
+
 ### `src/backfill.py` & `src/cache_warmer.py`
 
 - `build_backfill_history(symbols, years, limit, verify)` — bulk-load yfinance OHLCV into the
@@ -716,6 +736,7 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 | `shared_results` | `share_id` PK (128-bit random), `job_id`, `owner_user_id` FK users ON DELETE CASCADE, `owner_anon`, `query`, `summary` JSONB, `created_at` | Day 6 public share links. `summary` is built by `share_page.build_share_summary` (a field whitelist — never the raw result). Revoke = DELETE. Purged with the account and by a Google takeover of a squatted row. |
 | `saved_strategies` | `id`, `user_id` FK users ON DELETE CASCADE, `query`, `rules` JSONB (`buy_rules`/`sell_rules` the engine ran), `symbols` JSONB, `saved_return_pct`, `saved_at` | Day 10. Written only from the owner's own finished job (never client numbers). ≤ 20 per user. |
 | `digest_sends` | (`user_id` FK CASCADE, `week_key` e.g. `2026-W40`) PK, `status` ('sending'/'sent'/'failed'), `attempts`, `updated_at` | The once-a-week ledger. `users.weekly_digest` (BOOLEAN, default TRUE) is the opt-out. |
+| `explanations` | `result_hash` PK, `payload` JSONB (`{narrative, prompt_version}`), `created_at` | Day 11. One reading per result (first writer wins). Model prose over numbers only — no user data, no owner, no cascade. |
 | `error_log` | `id`, `occurred_at` TIMESTAMPTZ, `method`, `route` (template), `error_type`, `trace` | One row per unhandled exception, written by `generic_exception_handler`. `route` is the route TEMPLATE, never the raw URL (which can carry a token); `trace` is scrubbed by `analytics.scrub()` (emails → `<email>`, JWTs → `<jwt>`, `Bearer …` → `Bearer <redacted>`, capped at 8,000 chars). No bodies, no headers. |
 
 ### Backtest DB (`BACKTEST_DATABASE_URL`) — also exists as SQLite (`data/backtest_history.db`) in dev
@@ -873,13 +894,14 @@ failures, staleness + reason; scheduler liveness + heartbeat age + PID.
    | `backtest_poll` | 120 | 10,000 | 50,000 | `GET /backtest/async/{job_id}`, `GET /try/backtest/{job_id}` — free status reads; no global bucket |
    | `anon_backtest` | 2 | 6 | 20 | `POST /try/backtest` (feeds `backtest_llm`); daily cap > the 3-run allowance so the friendly 403 comes first |
    | `share` | 10 | 100 | 400 | `/results/*` (DB writes only); `/r/*` public pages fall in `read` |
+   | `explain` | 5 | 40 | 200 | `/explain` (feeds its own global `explain_llm`, never the screener's) |
    | `refresh` | 1 | 10 | 50 | `/refresh` |
    | `auth` | 10 | 50 | 350 | `/auth/*` except register and the email-sending routes |
    | `register` | 3 | 10 | 30 | `/auth/register` (SendGrid cost shield) |
    | `auth_mail` | 3 | 10 | 30 | `/auth/password-reset/*`, `/auth/resend-verification` (send email; share `auth_register` global) |
 
 2. **Global buckets** (all users share; fixed 24h): `screener_llm` 900/day (screen+interpret+
-   enrich), `backtest_llm` 200/day, `refresh_ops` 3/day (each refresh fires thousands of
+   enrich), `backtest_llm` 200/day, `explain_llm` 300/day, `refresh_ops` 3/day (each refresh fires thousands of
    Finnhub calls), `auth_register` 50/day (planet-wide cap on email-sending auth actions — register, reset, resend — protecting SendGrid).
 
 **Behavior:**
@@ -1200,6 +1222,9 @@ portable mirror and pinned in sync by `npm run verify:headers`.
   (plus stop/target) are applied in `_run_backtest_pipeline` and echoed in `strategy`; the
   frontend sends only what the user set. Don't reintroduce text appended to `query` — the
   parser ignores it and it shows up on share pages.
+- **The explanation must never become advice.** Don't loosen `COMPLIANCE_PATTERNS` to let a
+  paragraph through, don't pass the model numbers outside `extract_facts`, and don't show a
+  `withheld` narrative. Changing the prompt or the facts means bumping `PROMPT_VERSION`.
 - **Never let a digest go out with a dead unsubscribe link** — `run_weekly_digest` refuses
   without `SHARE_BASE_URL`; GET on `/email/unsubscribe` must stay side-effect free (scanners).
   A `'sending'` ledger row is never retried: a missed email beats a duplicate.
@@ -1220,6 +1245,13 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 ## 19. Recent significant changes
 
 These shaped current behavior — don't "clean up" them without understanding why:
+
+- **Day 11 — explain the result:** `POST /explain` + `src/explain.py` + the Backtest page's
+  "What happened" panel (`components/backtest/ExplainPanel.tsx`, under the risk disclaimer).
+  Findings are deterministic and always render; the model's paragraph is shown only past the
+  compliance + number guards, and its absence never blocks the result. New table
+  `explanations` (migration `c7d8e9f0a1b2`), scope `explain` + global `explain_llm`, probe
+  `verify_explain.py` added to the release gate (19 probes).
 
 - **Day 10 — saved strategies + the weekly email:** "Follow weekly" on a finished backtest
   (`components/backtest/FollowButton.tsx`) saves it via `POST /me/strategies` with only the

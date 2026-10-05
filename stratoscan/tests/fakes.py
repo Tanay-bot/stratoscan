@@ -442,6 +442,16 @@ class FakeUserDB:
             "created_at": self._share_seq,
         }
 
+    # Day 11: the explanation cache (first writer wins, like the real table).
+    def get_explanation(self, result_hash: str) -> Optional[Dict[str, Any]]:
+        row = getattr(self, "explanations", {}).get(result_hash)
+        return dict(row) if row else None
+
+    def save_explanation(self, result_hash: str, payload: Dict[str, Any]) -> None:
+        if not hasattr(self, "explanations"):
+            self.explanations = {}
+        self.explanations.setdefault(result_hash, dict(payload))
+
     def find_share_for_job(self, job_id, owner_user_id, owner_anon) -> Optional[str]:
         rows = [r for r in self.shares.values()
                 if r["job_id"] == job_id and self._owned(r, owner_user_id, owner_anon)]

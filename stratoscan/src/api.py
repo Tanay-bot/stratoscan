@@ -119,6 +119,10 @@ RATE_LIMITS = {
     "enrich":    {"burst": 3,   "daily": 20,    "weekly": 100},
     "backtest":  {"burst": 2,   "daily": 10,    "weekly": 50},
     "refresh":   {"burst": 1,   "daily": 10,    "weekly": 50},
+    # Day 11: POST /explain — one LLM call per result (cached by result
+    # hash, so a repeat costs nothing). Its own scope and its own global
+    # bucket, so explanations can never eat the screener's daily allowance.
+    "explain":   {"burst": 5,   "daily": 40,    "weekly": 200},
     # The generic per-IP bucket (every endpoint not explicitly scoped
     # above). Env-configurable for production: RATE_LIMIT_PER_MINUTE /
     # RATE_LIMIT_PER_DAY (src/config.py). Weekly = 5x the daily cap so
@@ -163,6 +167,7 @@ RATE_LIMITS = {
 GLOBAL_LIMITS = {
     "screener_llm": 900,  # /screen + /interpret + /enrich together
     "backtest_llm": 200,  # all /backtest calls together
+    "explain_llm": 300,   # all /explain calls together (Day 11)
     # /refresh is ADMIN-GATED (see the route) — this global daily cap is
     # defense-in-depth against a compromised admin token or a botnet that
     # rotates past the per-IP caps: each /refresh fires THOUSANDS of
@@ -191,6 +196,7 @@ SCOPE_GLOBAL = {
     "auth_mail": "auth_register",
     # Anonymous backtests spend the same engine/LLM budget as signed-in ones.
     "anon_backtest": "backtest_llm",
+    "explain": "explain_llm",
 }
 
 _BURST_SECONDS = 60
@@ -217,6 +223,7 @@ def _scope_for_path(path: str) -> str:
         ("/try/backtest", "anon_backtest"),
         ("/try", "auth"),
         ("/results", "share"),
+        ("/explain", "explain"),
         ("/backtest/async/", "backtest_poll"),
         ("/backtest", "backtest"),
         ("/refresh", "refresh"),
@@ -956,6 +963,12 @@ class ShareRequest(BaseModel):
     job_id: str = Field(..., min_length=3, max_length=64, description="The finished async backtest to share")
 
 
+class ExplainRequest(BaseModel):
+    """Request body for POST /explain (Day 11)."""
+
+    job_id: str = Field(..., min_length=3, max_length=64, description="The finished async backtest to explain")
+
+
 class VerifyEmailRequest(BaseModel):
     """Request body for the email verification endpoint.
 
@@ -1559,15 +1572,15 @@ def _endpoint_auth(path: str, methods: List[str]) -> str:
       - /backtest requires a bearer token (get_current_user)
       - /auth/me, /auth/resend-verification and /auth/logout-all require a token
       - /try/claim needs BOTH a bearer token and the trial token ("bearer")
-      - other /try/* and /results/* take an X-Anon-Token trial token (or, for
-        /results/*, a bearer token instead) — "trial"
+      - other /try/*, /results/* and /explain take an X-Anon-Token trial token
+        (or, for /results/* and /explain, a bearer token instead) — "trial"
       - everything else is public (rate-limited only)
     """
     if path.startswith(("/admin", "/ops", "/refresh")):
         return "admin"
     if path == "/try/claim":
         return "bearer"
-    if path.startswith(("/try/backtest", "/results/")):
+    if path.startswith(("/try/backtest", "/results/", "/explain")):
         return "trial"
     if path.startswith("/backtest"):
         return "bearer"
@@ -4045,7 +4058,9 @@ async def try_claim(
     }
 
 
-def _share_owner(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+def _share_owner(
+    request: Request, action: str = "share results"
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """``(user, None)`` for an account, ``(None, anon_id)`` for a trial session.
 
     An account token wins when both are present. A Bearer token that fails
@@ -4059,7 +4074,7 @@ def _share_owner(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[s
     if aid:
         return None, aid
     raise HTTPException(
-        status_code=401, detail="Sign in or start a free trial to share results."
+        status_code=401, detail=f"Sign in or start a free trial to {action}."
     )
 
 
@@ -4112,6 +4127,57 @@ async def share_result(request: Request, response: Response, payload: ShareReque
             status_code=502, detail="Could not create a share link right now. Try again later."
         )
     return {"error": False, "share_id": share_id, "url": _share_url(request, share_id)}
+
+
+# ── Explain a result (Day 11) ───────────────────────────────────────────────
+
+_EXPLAIN_CACHE: Any = None
+
+
+def _explain_cache():
+    """Process-wide cache: memory first, then the main DB (``explanations``)."""
+    global _EXPLAIN_CACHE
+    if _EXPLAIN_CACHE is None:
+        from src.database import PostgresDB
+        from src.explain import ExplanationCache
+
+        _EXPLAIN_CACHE = ExplanationCache(
+            db_factory=(lambda: PostgresDB()) if settings.has_database_url else None
+        )
+    return _EXPLAIN_CACHE
+
+
+@app.post(
+    "/explain",
+    summary="Explain a finished backtest in plain English (descriptive, never advice)",
+    tags=["Backtesting"],
+)
+def explain_backtest(request: Request, response: Response, payload: ExplainRequest):
+    """A reading of what happened in one of YOUR finished backtests.
+
+    Sends only a job id: the facts are taken from the server's stored result
+    by a whitelist. ``findings`` are deterministic and always present;
+    ``narrative`` is an LLM paragraph over the same facts, shown only when it
+    passes the compliance guard and the number guard — otherwise it is null
+    and ``narrative_status`` says why (``unavailable`` or ``withheld``).
+    Cached by result hash, so one result always gets one reading. A plain
+    ``def`` on purpose: FastAPI runs it in the threadpool, so the model call
+    never blocks the event loop.
+    """
+    from src.explain import explain_result
+
+    user, aid = _share_owner(request, "explain results")
+    owner = (user.get("email") or "") if user else _anon_owner(aid)
+    snapshot = _owned_job_snapshot(payload.job_id, owner)
+    result = snapshot.get("result")
+    if snapshot.get("status") != "done" or not isinstance(result, dict):
+        raise HTTPException(status_code=409, detail="This backtest hasn't finished yet.")
+    if not result.get("results"):
+        raise HTTPException(
+            status_code=422,
+            detail="There's nothing to explain — this strategy matched no stocks.",
+        )
+    return explain_result(result, cache=_explain_cache())
 
 
 @app.delete(

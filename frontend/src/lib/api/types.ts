@@ -153,6 +153,26 @@ export interface SavedStrategy {
   saved_at: string
 }
 
+/** Day 11: a plain-English reading of one finished backtest (POST /explain). */
+export interface ExplanationFinding {
+  code: string
+  tone: 'caution' | 'info' | 'positive'
+  text: string
+}
+
+export interface Explanation {
+  result_hash: string
+  basis: 'single' | 'portfolio' | 'none'
+  /** Deterministic, always present — computed from the result's own numbers. */
+  findings: ExplanationFinding[]
+  /** Model-written, shown only when it passed the compliance + number guards. */
+  narrative: { summary: string; points: string[] } | null
+  narrative_status: 'ok' | 'unavailable' | 'withheld'
+  disclaimer: string
+  cached: boolean
+  facts: Record<string, unknown>
+}
+
 export interface EmailPreferences {
   weekly_digest: boolean
   email_verified: boolean
