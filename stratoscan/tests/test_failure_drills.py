@@ -1,7 +1,8 @@
 """Day 13 — failure drills 5, 6 and 7 (hermetic). Each must DEGRADE, never 500.
 
 Drills 1–4 (Finnhub keys dead, every LLM provider down, yfinance timeout,
-Upstash down) are live probes in ``verify_failure_drills.py``. These three
+Upstash down) live in ``verify_failure_drills.py`` (also hermetic — failures
+injected at the real boundaries; run by the release gate). These three
 are new and need no network:
 
   5. Mail transport down — SendGrid unreachable (and SMTP refusing).

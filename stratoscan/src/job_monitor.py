@@ -406,12 +406,12 @@ class PostgresJobMonitorStore(JobMonitorStore):
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT EXTRACT(EPOCH FROM last_beat_at) AS last_beat_at, "
-                    "pid FROM scheduler_heartbeat WHERE id=1"
+                    "pid, owner FROM scheduler_heartbeat WHERE id=1"
                 )
                 row = cur.fetchone()
             if row and row[0] is not None:
                 # Same Decimal → float normalization as recent_runs().
-                return {"last_beat_at": float(row[0]), "pid": row[1]}
+                return {"last_beat_at": float(row[0]), "pid": row[1], "owner": row[2]}
             return None
         finally:
             try:
@@ -705,6 +705,9 @@ class JobMonitor:
                 ),
                 "heartbeat_age_seconds": heartbeat_age,
                 "pid": (heartbeat or {}).get("pid"),
+                # Day 15: the lease holder ("host:pid"; None = released). Every
+                # container is pid 1, so the pid alone can't tell two apart.
+                "lease_owner": (heartbeat or {}).get("owner"),
                 "persist_interval_minutes": settings.job_heartbeat_persist_minutes,
             },
         }

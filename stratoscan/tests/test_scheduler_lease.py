@@ -48,6 +48,7 @@ assert st.last_heartbeat()["owner"] == ME
 st.release_scheduler(ME)
 assert st.last_heartbeat()["owner"] is None
 assert st.claim_scheduler(OTHER, 2700)["claimed"]                   # released → free at once
+assert JobMonitor(st).summary()["scheduler"]["lease_owner"] == OTHER  # /ops/jobs shows the holder
 print("✅ lease: free/own/stale/forced → granted; fresh and someone else's → refused; release frees it")
 
 

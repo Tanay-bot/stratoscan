@@ -154,10 +154,15 @@ def main() -> int:
     from src import interpreter as interp  # noqa: E402
     from fastapi.testclient import TestClient  # noqa: E402
 
+    # Every check below forces the LLM path. Since the hybrid interpreter
+    # shipped, simple queries ("tech stocks") parse for free and never touch a
+    # provider — the drill must exercise the path that does (Day 15 fix).
+    no_fast_path = mock.patch.object(interp.settings, "use_deterministic_interpreter", False)
+
     # 2a. interpret_query returns .error instead of raising.
     boom = mock.Mock()
     boom.chat_completion.side_effect = RuntimeError("all providers down")
-    with mock.patch("src.llm_router.get_router", return_value=boom), \
+    with mock.patch("src.llm_router.get_router", return_value=boom), no_fast_path, \
          mock.patch.object(interp.settings, "cache_enabled", False):
         iq = interp.interpret_query("oversold tech stocks")
     _check("D2", "interpret_query degrades to .error (never raises)",
@@ -169,7 +174,7 @@ def main() -> int:
 
     boom2 = mock.Mock()
     boom2.chat_completion.side_effect = RuntimeError("provider exploded")
-    with mock.patch("src.llm_router.get_router", return_value=boom2), \
+    with mock.patch("src.llm_router.get_router", return_value=boom2), no_fast_path, \
          mock.patch.object(api_mod.settings, "cache_enabled", False), \
          mock.patch.object(api_mod.settings, "rate_limit_enabled", False), \
          mock.patch("src.screener.PostgresDB", return_value=FakeQualityDB([])):
@@ -186,17 +191,22 @@ def main() -> int:
         _check("D2", "/screen surfaces llm_error in interpreted_filters",
                bool((body.get("interpreted_filters") or {}).get("llm_error")))
 
-    # 2c. POST /backtest → 502 generic (not 500, no raw exception leak).
-    with mock.patch("src.llm_router.get_router", return_value=boom2), \
+    # 2c. POST /backtest → 502 generic (not 500, no raw exception leak). The
+    # route needs an entitled account (Day 6/12); without one the request
+    # stops at a 401 and never reaches the dead provider, which proves nothing.
+    drill_user = {"id": 1, "email": "drill@example.test", "plan": "pro", "grandfathered_pro": True,
+                  "is_admin": False, "email_verified": True}
+    with mock.patch("src.llm_router.get_router", return_value=boom2), no_fast_path, \
+         mock.patch.object(api_mod, "get_current_user", return_value=drill_user), \
+         mock.patch.object(api_mod, "_charge_backtest", return_value=None), \
          mock.patch.object(api_mod.settings, "cache_enabled", False), \
          mock.patch.object(api_mod.settings, "rate_limit_enabled", False), \
          mock.patch("src.screener.PostgresDB", return_value=FakeQualityDB([])):
         api_mod._screen_cache.clear()
         client = TestClient(api_mod.app)
         r = client.post("/backtest", json={"query": "buy oversold stocks"})
-        _check("D2", "/backtest is NOT a 500 when the LLM is down",
-               r.status_code in (400, 401, 402, 403, 404, 405, 409, 422, 429, 502),
-               f"status {r.status_code}")
+        _check("D2", "/backtest answers 502 (not 500) when the LLM is down",
+               r.status_code == 502, f"status {r.status_code}")
         detail = (r.json().get("detail") or "") if r.status_code != 200 else ""
         _check("D2", "/backtest detail is generic (no raw exception text)",
                "provider exploded" not in detail,

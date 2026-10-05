@@ -8,7 +8,7 @@
 > long: read the section you need, not the whole thing.
 
 > **Owner:** this file is the source of truth for how this repo is built and the rules for changing it — architecture, module reference, schemas, gotchas.
-> HTTP contract → `stratoscan/FRONTEND_API.md`. Deploying → `DEPLOY.md`. Scheduler → `stratoscan/SCHEDULER.md`. Release gate → `stratoscan/RELEASE_GATE.md`. Frontend visual system → `DESIGN.md`.
+> HTTP contract → `stratoscan/FRONTEND_API.md`. Deploying → `DEPLOY.md`; going live (drills, production-only checks, rollback, incidents, costs) → `RUNBOOK.md`. Scheduler → `stratoscan/SCHEDULER.md`. Release gate → `stratoscan/RELEASE_GATE.md`. Frontend visual system → `DESIGN.md`.
 
 ---
 
@@ -1185,7 +1185,9 @@ pass; writes a markdown report. `scripts/run_release_gate.sh` wraps it. CI gate 
   through the SQL writer AND the interpreter; XSS on share/unsubscribe/admin; rate-limit bypass
   (forged headers, token cycling, preflight, rolling edge identical in Redis and memory).
 - `tests/test_failure_drills.py` — drills 5–7 (mail down, error capture failing, DB unreachable
-  mid-request → 503 + Retry-After, never 500, never a logout). Drills 1–4: `verify_failure_drills.py`.
+  mid-request → 503 + Retry-After, never 500, never a logout). Drills 1–4: `verify_failure_drills.py`
+  (also hermetic; in the release gate). Day 15 fixed drill 2: it now forces the LLM path and
+  authenticates `/backtest` — before, the free parser and a 401 made it pass without testing anything.
 - `tests/test_db_pool.py` — the shared pool waits for a connection instead of failing.
 - **E2E** (`frontend/e2e/`, `npx playwright test`; CI: `e2e.yml` on every push) — four journeys
   plus an axe-core + keyboard sweep, against `stratoscan/e2e_stack.py`: a throwaway local Postgres
@@ -1266,6 +1268,10 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 | Backfill OHLCV | `python -m src.main backfill-history --symbols AAPL,MSFT --years 10` |
 | Warm cache once | `python -m src.main warm-cache` |
 | Live server on staging | `python launch_staging_detached.py` (API on :8010) |
+| Production-shaped local stack | `make rebuild` (repo root; compose: API + scheduler containers, 3 DBs, Redis shim, mailbox) |
+| Backup/restore drill | `python scripts/backup_restore_drill.py --report drill.md` (from `stratoscan/`; needs the three `*_DATABASE_URL`) |
+| Rollback drill | `scripts/rollback_drill.sh` (repo root, against `make up`) |
+| Who holds the scheduler lease | `GET /ops/jobs` → `scheduler.lease_owner` |
 
 ---
 
@@ -1360,6 +1366,14 @@ portable mirror and pinned in sync by `npm run verify:headers`.
 ## 19. Recent significant changes
 
 These shaped current behavior — don't "clean up" them without understanding why:
+
+- **Day 15 — dress rehearsal:** cold start 66 s, backup/restore of all three DBs identical,
+  rollback 9.5 s (`RUNBOOK.md` has the numbers and the launch checklist). Found and fixed: two
+  schedulers could run side by side (now a lease — §9), `fly.toml` had no scheduler process at
+  all (now `[processes]` app + scheduler), and `deploy.yml` called `fly rollback`, which does not
+  exist (now redeploys the last green `sha-<commit>` image); failure drill 2 passed without
+  testing anything (fixed). Migration `f0a1b2c3d4e5` (`scheduler_heartbeat.owner`). Not done
+  here: the staging release gate, real market data, the five-person sessions.
 
 - **Day 14 — make every claim true:** volume backfilled from stored daily bars
   (`cache_warmer.backfill_volume_from_history`, `compute_indicators` volume; a volume filter reports

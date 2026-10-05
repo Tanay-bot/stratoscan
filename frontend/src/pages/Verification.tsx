@@ -16,28 +16,28 @@ const DRILLS: { n: number; what: string; proves: string; how: string }[] = [
     what: 'All ten market-data keys dead',
     proves:
       'Retries back off, a hard failure stops fast, a dead refresh writes nothing and never corrupts stored prices.',
-    how: 'live probe',
+    how: 'release gate',
   },
   {
     n: 2,
     what: 'Every language-model provider down',
     proves:
       'A screen says it could not read the query instead of returning the whole market; a backtest fails with a plain message, never internals.',
-    how: 'live probe',
+    how: 'release gate',
   },
   {
     n: 3,
     what: 'Price history download times out',
     proves:
       'The missing symbol is dropped cleanly; no half-empty series reaches the simulator to poison the averages.',
-    how: 'live probe',
+    how: 'release gate',
   },
   {
     n: 4,
     what: 'Rate-limit store (Redis) down',
     proves:
       'The site stays up and limits keep working per server; the fallback is logged so we can see it happened.',
-    how: 'live probe',
+    how: 'release gate',
   },
   {
     n: 5,
@@ -227,9 +227,10 @@ const SECTIONS: LegalSection[] = [
           </table>
         </div>
         <p>
-          &ldquo;Every deploy&rdquo; drills need no outside service and gate every release.
-          &ldquo;Live probe&rdquo; drills need the real services, so they run against our staging
-          environment as part of the release gate rather than on every change.
+          None of the seven needs a real outage: each failure is injected at the exact point where
+          the outside service is called, and the real code path runs. &ldquo;Every deploy&rdquo;
+          drills gate every release; &ldquo;release gate&rdquo; drills run in the fuller check
+          before a release. All seven last passed on 5 October 2026.
         </p>
       </>
     ),

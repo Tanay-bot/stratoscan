@@ -3,6 +3,22 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 15 — Deployment dress rehearsal
+
+**Shipped:** the environment rebuilds from nothing in 66 seconds with one command; all three
+databases back up and restore byte-for-byte (every table fingerprinted, a single changed price
+caught); a deliberately broken release is noticed in 2 seconds and rolled back in under 10; the
+full gate is green (63 suites, 7 drills, golden set, accuracy loop, 15 browser checks). The
+launch runbook names everything that can only be done live, what a month costs, and what to do
+when something breaks.
+
+**Broke / found:** "check, then check again" earned its place — a second scheduler started
+silently and ran every job twice; production's config had no scheduler at all, so screens would
+have emptied a week after launch; and the automatic rollback called a command Fly doesn't have.
+All three fixed and rehearsed. A failure drill had been passing without testing anything. Not
+done: the staging release gate and real data (no keys on this machine), a market-data licence
+(the real launch blocker), and the five people in the room.
+
 ## Day 14 — Make every claim true
 
 **Shipped:** nothing advertised is broken, and the evidence is public. Volume — advertised as two
