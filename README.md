@@ -564,7 +564,15 @@ The frontend handles this automatically:
 - Strategy echo (stops, sizing, buy-and-hold rules)
 - Garbage input fails honestly (no fake success)
 
-**Current result: 14,294/14,294 checks passed (100.00%)**
+**Last run: 2026-10-05 — 3,503 / 3,503 checks passed on 49 symbol results from 19 of the 30
+queries.** Run on the offline E2E stack (`stratoscan/e2e_stack.py`: synthetic prices, no language
+model): the 10 queries that need a model to interpret them were not run, and the one garbage
+query failed honestly, as it must. Re-run against a full database and a configured model before
+launch, and update this line with the date.
+
+> The figure previously shown here (14,294 / 14,294) came from a counter that double-counted
+> failed queries and ignored queries that returned nothing; it was fixed on 2026-10-05 and that
+> figure is withdrawn.
 
 ### Golden set
 

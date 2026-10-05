@@ -1133,8 +1133,10 @@ pass; writes a markdown report. `scripts/run_release_gate.sh` wraps it. CI gate 
 
 - `accuracy_loop.py` — 30 diverse queries, independently recomputes every reported number
   (per-trade PnL vs cash deltas, cash conservation `final_value == initial + ΣPnL`, win rate,
-  endpoints, benchmark/excess, strategy echo, garbage fails honestly). Tracked at
-  14,294/14,294 checks passing.
+  endpoints, benchmark/excess, strategy echo, garbage fails honestly). Last run 2026-10-05:
+  3,503/3,503 checks on 49 symbol results (offline stack — 10 model-dependent queries not run;
+  `ACC_ALLOW_UNRUN=1`). Queries that return no result are reported as NOT RUN and fail the loop
+  unless allowed — the pre-Day-13 counter double-counted and hid them.
 - `rule_execution_loop.py` — ground-truth rule execution tests.
 
 ### Adversarial, drills, end-to-end, accessibility, load (Day 13)

@@ -25,5 +25,9 @@ test('new account: signup, verify, backtest, save, logout, login, see saved', as
 
   await logIn(page, email, PASSWORD)
   await page.goto('/app')
-  await expect(page.getByText(`“${query}”`)).toBeVisible()
+  // Scoped: the same query also appears under "Recent backtests", and an
+  // unscoped match was ambiguous once that panel loaded (a flaky first run).
+  await expect(
+    page.getByRole('region', { name: 'Saved strategies' }).getByText(`“${query}”`),
+  ).toBeVisible()
 })

@@ -78,6 +78,8 @@ VALID_EXITS = {"signal", "stop_loss", "take_profit", "trailing_stop", "end_of_pe
 RESULTS: dict = {}   # query -> {checks, passes, failures: [...]}
 ALL_FAILS: list = []
 CHECK_COUNT: list = [0]  # exact total of invariant checks run (mutable cell)
+SYMBOL_RESULTS: list = [0]  # symbol results verified
+NOT_RUN: list = []  # non-garbage queries that returned no result (e.g. no LLM to interpret them)
 
 
 def api_post(path: str, payload: dict, token: str):
@@ -303,14 +305,22 @@ def run() -> int:
                 print(f"[{i:02d}/{len(QUERIES)}] {st} {dt:.0f}s '{q}' "
                       f"{'✅ honest failure' if ok else '❌ unexpected status'}", flush=True)
             else:
-                print(f"[{i:02d}/{len(QUERIES)}] {st} {dt:.0f}s '{q}' ❌ HTTP {st} "
+                # Not run is NOT passed: count it and say so (it used to print
+                # a ❌ and still end in "ALL CHECKS PASSED").
+                NOT_RUN.append(f"{q}: HTTP {st} {str(body.get('detail', ''))[:80]}")
+                print(f"[{i:02d}/{len(QUERIES)}] {st} {dt:.0f}s '{q}' ⏭  NOT RUN — HTTP {st} "
                       f"{str(body)[:120]}", flush=True)
-            qres["failures"] = ALL_FAILS[before:]
-            qres["checks"] = CHECK_COUNT[0] - qres["checks"]
+            fails = ALL_FAILS[before:]
+            qres["failures"] = fails
+            # Checks THIS query ran (the old code subtracted 0 here, adding the
+            # whole running total again for every failed query).
+            qres["checks"] = CHECK_COUNT[0] - checks_start
+            qres["passes"] = qres["checks"] - len(fails)
             RESULTS[q] = qres
             continue
 
         verify_strategy_echo(q, body, extra)
+        SYMBOL_RESULTS[0] += len(body.get("results") or {})
         for sym, r in (body.get("results") or {}).items():
             verify_symbol(q, sym, r, body.get("strategy") or {})
 
@@ -335,7 +345,8 @@ def run() -> int:
     total_checks = sum(v["checks"] for v in RESULTS.values())
     total_passes = sum(v["passes"] for v in RESULTS.values())
     print(f"queries run:        {len(RESULTS)}", flush=True)
-    print(f"symbol results:     {sum(len((b or {}).get('results', {})) for b in [{}])}", flush=True)
+    print(f"queries not run:    {len(NOT_RUN)}", flush=True)
+    print(f"symbol results:     {SYMBOL_RESULTS[0]}", flush=True)
     print(f"invariant checks:   {total_checks} (across all symbol results)", flush=True)
     print(f"checks passed:      {total_passes}", flush=True)
     print(f"checks failed:      {len(ALL_FAILS)}", flush=True)
@@ -345,8 +356,17 @@ def run() -> int:
         print("\nFAILURES:", flush=True)
         for f in ALL_FAILS:
             print(f"  ❌ {f}", flush=True)
-    print("\n" + ("✅ ALL CHECKS PASSED" if not ALL_FAILS else "❌ FAILURES PRESENT"), flush=True)
-    return 1 if ALL_FAILS else 0
+    if NOT_RUN:
+        print("\nNOT RUN (no result to verify):", flush=True)
+        for n in NOT_RUN:
+            print(f"  ⏭  {n}", flush=True)
+    allow_unrun = os.environ.get("ACC_ALLOW_UNRUN") == "1"
+    ok = not ALL_FAILS and (allow_unrun or not NOT_RUN)
+    verdict = "✅ ALL CHECKS PASSED" if ok else "❌ FAILURES PRESENT"
+    if ok and NOT_RUN:
+        verdict += f" ({len(NOT_RUN)} queries not run — ACC_ALLOW_UNRUN=1)"
+    print("\n" + verdict, flush=True)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

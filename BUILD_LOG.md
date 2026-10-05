@@ -3,6 +3,28 @@
 > The 15-day plan's closing ritual: two lines a day — what shipped, what broke. On day 15
 > this is the launch narrative. Newest first. Detail lives in `.claude/tasks/`.
 
+## Day 13 — Testing blitz
+
+**Shipped:** the product is now tested the way people use it and the way people attack it. Four
+journeys run in a real browser against a real stack on every push — a stranger who never signs
+up, a new account from signup to saved strategy, a forgotten password, and a plan going Pro and
+back — with a throwaway database of synthetic prices and a mail catcher standing in for the
+inbox. An adversarial suite throws 577 checks at it: every signed-in route with forged, expired
+and stolen tokens, other people's ids, SQL and markup through every input including the
+language model's own answer, and every known way around the rate limits. Three new failure
+drills (mail down, error capture down, the database vanishing mid-request) and an accessibility
+sweep that measures rather than estimates. The load ceiling is a written number (LOAD.md).
+
+**Broke / found:** a lot, which is the point. Behind Fly's proxy every visitor shared one
+rate-limit bucket. A database blip answered "account not found", which logged everyone out. The
+connection pool failed instead of waiting, so eight people backtesting at once got errors. The
+SQL whitelist was closed only because every caller happened to map fields first. The
+explanation called the portfolio's return "the strategy's" next to a single stock's number, and
+said a rising account had been underwater for 90 months. A heatmap drew solid colour behind
+same-colour text. And the accuracy loop's own counter was wrong — it double-counted, reported
+16% accuracy beside "all checks passed", and ignored queries that never ran — so its headline
+figure is now recomputed and dated rather than trusted.
+
 ## Day 12 — Entitlements without a payment provider
 
 **Shipped:** two plans, one decision. `plan_for(user)` is the only place that says what an account
