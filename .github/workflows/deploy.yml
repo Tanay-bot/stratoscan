@@ -22,8 +22,12 @@
 #                     below proves they succeeded (uvicorn won't start until they
 #                     pass).
 #   5. healthcheck   — poll https://stratoscan-api.fly.dev/health until 200.
-#   6. rollback      — if /health never returns 200, `fly rollback` restores the
-#                     previous release and the job fails loudly.
+#   6. rollback      — if /health never returns 200, redeploy the image of the
+#                     last successful deploy and fail loudly. (There is no
+#                     `fly rollback` command — a rollback IS a deploy of an older
+#                     image. Day 15 found the old step called one.) Each deploy's
+#                     image is labelled `sha-<commit>`, so the previous good image
+#                     is `registry.fly.io/stratoscan-api:sha-<last green commit>`.
 #
 # Secrets required (GitHub → Settings → Secrets and variables → Actions):
 #   FLY_API_TOKEN          — fly auth token (Dashboard → Account → Access Tokens)
@@ -161,6 +165,10 @@ jobs:
     name: Deploy → Fly.io
     runs-on: ubuntu-latest
     needs: [gate, release-gate]
+    # actions: read lets the rollback step find the last green deploy.
+    permissions:
+      contents: read
+      actions: read
     # Run when gate passed AND release-gate is either passed or skipped
     # (disabled). A failed release-gate skips this job → release blocked.
     if: ${{ always() && needs.gate.result == 'success' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
@@ -273,9 +281,21 @@ jobs:
           PY
           fly secrets import -a stratoscan-api --stage < /tmp/fly-secrets.txt
 
+      # The commit of the last fully successful run of this workflow — its image
+      # (labelled below) is what a rollback redeploys. Empty on the first run.
+      - name: Find the release to roll back to
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?status=success&branch=main&per_page=1" \
+                --jq '.workflow_runs[0].head_sha // ""' || true)
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "rollback target: ${sha:-<none — first labelled deploy>}"
+
       - name: Deploy (remote build; entrypoint runs alembic upgrade head)
         id: deploy
-        run: fly deploy -a stratoscan-api --remote-only --wait-timeout 900 -y
+        run: fly deploy -a stratoscan-api --remote-only --image-label "sha-${GITHUB_SHA}" --wait-timeout 900 -y
 
       - name: Healthcheck gate — /health must return 200
         id: healthcheck
@@ -300,6 +320,24 @@ jobs:
       # to the still-live previous release.
       - name: Rollback on deploy or healthcheck failure
         if: steps.healthcheck.outcome == 'failure' || steps.deploy.outcome == 'failure'
+        env:
+          PREV: ${{ steps.previous.outputs.sha }}
         run: |
-          echo "Rolling back to previous release..."
-          fly rollback -a stratoscan-api --yes
+          manual="Roll back by hand: fly releases -a stratoscan-api --image   then   fly deploy -a stratoscan-api --image <previous image ref> --strategy immediate -y"
+          if [ -z "$PREV" ]; then
+            echo "::error::No previous successful deploy recorded. $manual"
+            exit 1
+          fi
+          echo "Rolling back to sha-$PREV ..."
+          if ! fly deploy -a stratoscan-api --image "registry.fly.io/stratoscan-api:sha-$PREV" \
+                 --strategy immediate --wait-timeout 600 -y; then
+            echo "::error::Automatic rollback failed (an image deployed before Day 15 has no sha- label). $manual"
+            exit 1
+          fi
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://stratoscan-api.fly.dev/health || echo 000)
+            [ "$code" = "200" ] && { echo "✅ rolled back to sha-$PREV and healthy"; break; }
+            sleep 10
+          done
+          # Fail the job either way: a rollback is an incident, not a green deploy.
+          exit 1

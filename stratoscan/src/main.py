@@ -246,10 +246,18 @@ def cmd_scheduler(args: argparse.Namespace) -> None:
 
     Usage: python -m src.main scheduler
     """
+    from src.scheduler import SchedulerAlreadyRunning
+
     scheduler = DataRefreshScheduler()
     print("🔄 Starting Stratoscan data refresh scheduler...")
     print("   Press Ctrl+C to stop.\n")
-    scheduler.start()
+    try:
+        scheduler.start(takeover=getattr(args, "takeover", False))
+    except SchedulerAlreadyRunning as e:
+        # Exit non-zero so a supervisor sees the refusal instead of a quiet
+        # second copy (golden rule 1: exactly one scheduler).
+        print(f"❌ {e}. Only one scheduler may run; use --takeover only if it is really gone.")
+        sys.exit(3)
 
 
 def cmd_digest(args: argparse.Namespace) -> None:
@@ -503,9 +511,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # scheduler
-    subparsers.add_parser(
+    scheduler_parser = subparsers.add_parser(
         "scheduler",
-        help="Start the background data refresh scheduler",
+        help="Start the background data refresh scheduler (exactly one may run)",
+    )
+    scheduler_parser.add_argument(
+        "--takeover",
+        action="store_true",
+        help="Take the single-scheduler lease even if it looks held (the previous scheduler must really be gone)",
     )
 
     # refresh-news

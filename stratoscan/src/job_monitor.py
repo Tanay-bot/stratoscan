@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -119,6 +120,16 @@ HEARTBEAT_STALE_MULTIPLIER: int = 3
 # Store Interface
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def scheduler_owner() -> str:
+    """This process's lease identity: ``host:pid`` (Day 15).
+
+    A container's hostname is its id, so two scheduler containers never share
+    an owner even though both run as pid 1; a restarted container keeps its
+    hostname and pid, so it re-claims its own lease without waiting.
+    """
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
 class JobMonitorStore(ABC):
     """Storage backend for job runs + scheduler heartbeat."""
 
@@ -139,8 +150,25 @@ class JobMonitorStore(ABC):
         """Mark a run finished with its outcome."""
 
     @abstractmethod
-    def record_heartbeat(self) -> None:
-        """Refresh the scheduler liveness beacon (throttled by the store)."""
+    def record_heartbeat(self) -> Optional[bool]:
+        """Refresh the scheduler liveness beacon (throttled by the store).
+
+        Returns False only when another scheduler now holds the lease (the
+        caller must stop); True/None otherwise (None = throttled, not written).
+        """
+
+    @abstractmethod
+    def claim_scheduler(self, owner: str, stale_after_seconds: float, force: bool = False) -> Dict[str, Any]:
+        """Take the single-scheduler lease (Day 15).
+
+        Granted when nobody holds it, ``owner`` already does, the holder's
+        last beat is older than ``stale_after_seconds``, or ``force``.
+        Returns ``{"claimed": bool, "holder": str|None, "age_seconds": float|None}``.
+        """
+
+    @abstractmethod
+    def release_scheduler(self, owner: str) -> None:
+        """Give the lease up (clean shutdown) — only if ``owner`` holds it."""
 
     @abstractmethod
     def recent_runs(self, job_name: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -180,12 +208,14 @@ class PostgresJobMonitorStore(JobMonitorStore):
         self._owns_pool = pool is None
         self._last_heartbeat_persist: float = 0.0
         self._schema_ready: bool = False
+        self._owner: Optional[str] = None
 
     def _ensure_pool_and_schema(self):
         """Lazily create the pool + tables (idempotent)."""
         from src.database import (
             JOB_RUNS_INDEXES,
             JOB_RUNS_SCHEMA,
+            SCHEDULER_HEARTBEAT_BACKFILL,
             SCHEDULER_HEARTBEAT_SCHEMA,
             _sanitize_dsn,
         )
@@ -210,6 +240,8 @@ class PostgresJobMonitorStore(JobMonitorStore):
                     for idx in JOB_RUNS_INDEXES:
                         cur.execute(idx)
                     cur.execute(SCHEDULER_HEARTBEAT_SCHEMA)
+                    for stmt in SCHEDULER_HEARTBEAT_BACKFILL:
+                        cur.execute(stmt)
                 conn.commit()
                 self._schema_ready = True
                 ok = True
@@ -282,21 +314,57 @@ class PostgresJobMonitorStore(JobMonitorStore):
             (status, duration_ms, records, details, error, run_id),
         )
 
-    def record_heartbeat(self) -> None:
-        """Persist a heartbeat, but at most once per persist interval."""
+    def record_heartbeat(self) -> Optional[bool]:
+        """Persist a heartbeat, but at most once per persist interval.
+
+        The write only lands while this process holds the lease (or nobody
+        does); a row owned by someone else means a takeover happened, and the
+        False return tells the scheduler loop to stop.
+        """
         interval = max(
             1, settings.job_heartbeat_persist_minutes * 60
         )
         now = time.time()
         if now - self._last_heartbeat_persist < interval:
-            return
-        self._execute(
-            "INSERT INTO scheduler_heartbeat (id, last_beat_at, pid) "
-            "VALUES (1, NOW(), %s) "
-            "ON CONFLICT (id) DO UPDATE SET last_beat_at=NOW(), pid=%s",
-            (os.getpid(), os.getpid()),
+            return None
+        owner = self._owner or scheduler_owner()
+        row = self._execute(
+            "INSERT INTO scheduler_heartbeat (id, last_beat_at, pid, owner) "
+            "VALUES (1, NOW(), %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET last_beat_at=NOW(), pid=EXCLUDED.pid, owner=EXCLUDED.owner "
+            "WHERE scheduler_heartbeat.owner IS NULL OR scheduler_heartbeat.owner = EXCLUDED.owner "
+            "RETURNING owner",
+            (os.getpid(), owner),
         )
         self._last_heartbeat_persist = now
+        return row is not None
+
+    def claim_scheduler(self, owner: str, stale_after_seconds: float, force: bool = False) -> Dict[str, Any]:
+        row = self._execute(
+            "INSERT INTO scheduler_heartbeat (id, last_beat_at, pid, owner) "
+            "VALUES (1, NOW(), %s, %s) "
+            "ON CONFLICT (id) DO UPDATE SET last_beat_at=NOW(), pid=EXCLUDED.pid, owner=EXCLUDED.owner "
+            "WHERE %s OR scheduler_heartbeat.owner IS NULL OR scheduler_heartbeat.owner = EXCLUDED.owner "
+            "OR scheduler_heartbeat.last_beat_at < NOW() - make_interval(secs => %s) "
+            "RETURNING owner",
+            (os.getpid(), owner, bool(force), float(stale_after_seconds)),
+        )
+        if row is not None:
+            self._owner = owner
+            self._last_heartbeat_persist = time.time()  # the claim is a beat
+            return {"claimed": True, "holder": owner, "age_seconds": 0.0}
+        held = self._execute(
+            "SELECT owner, EXTRACT(EPOCH FROM (NOW() - last_beat_at)) "
+            "FROM scheduler_heartbeat WHERE id=1"
+        )
+        return {"claimed": False, "holder": held[0] if held else None,
+                "age_seconds": float(held[1]) if held and held[1] is not None else None}
+
+    def release_scheduler(self, owner: str) -> None:
+        self._execute(
+            "UPDATE scheduler_heartbeat SET owner = NULL WHERE id = 1 AND owner = %s",
+            (owner,),
+        )
 
     def recent_runs(self, job_name: str, limit: int = 50) -> List[Dict[str, Any]]:
         self._ensure_pool_and_schema()
@@ -373,6 +441,7 @@ class InMemoryJobMonitorStore(JobMonitorStore):
         self._runs: List[Dict[str, Any]] = []
         self._next_id: int = 1
         self._heartbeat: Optional[Dict[str, Any]] = None
+        self._owner: Optional[str] = None
 
     def record_start(self, job_name: str) -> Optional[int]:
         with self._lock:
@@ -413,9 +482,29 @@ class InMemoryJobMonitorStore(JobMonitorStore):
                     run["error"] = error
                     return
 
-    def record_heartbeat(self) -> None:
+    def record_heartbeat(self) -> Optional[bool]:
         with self._lock:
-            self._heartbeat = {"last_beat_at": time.time(), "pid": os.getpid()}
+            owner = self._owner or scheduler_owner()
+            holder = (self._heartbeat or {}).get("owner")
+            if holder not in (None, owner):
+                return False  # taken over — mirrors the Postgres WHERE clause
+            self._heartbeat = {"last_beat_at": time.time(), "pid": os.getpid(), "owner": owner}
+            return True
+
+    def claim_scheduler(self, owner: str, stale_after_seconds: float, force: bool = False) -> Dict[str, Any]:
+        with self._lock:
+            hb = self._heartbeat or {}
+            holder, age = hb.get("owner"), (time.time() - hb["last_beat_at"]) if hb else None
+            if force or holder in (None, owner) or (age is not None and age > stale_after_seconds):
+                self._heartbeat = {"last_beat_at": time.time(), "pid": os.getpid(), "owner": owner}
+                self._owner = owner
+                return {"claimed": True, "holder": owner, "age_seconds": 0.0}
+            return {"claimed": False, "holder": holder, "age_seconds": age}
+
+    def release_scheduler(self, owner: str) -> None:
+        with self._lock:
+            if self._heartbeat and self._heartbeat.get("owner") == owner:
+                self._heartbeat = {**self._heartbeat, "owner": None}
 
     def recent_runs(self, job_name: str, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
@@ -514,9 +603,36 @@ class JobMonitor:
             # Alerting must never break the job monitor itself.
             logger.warning("Job-failure alert failed: %s", e)
 
-    def heartbeat(self) -> None:
-        """Emit a scheduler liveness beat (store throttles persistence)."""
-        self._try(self._store.record_heartbeat)
+    def heartbeat(self) -> bool:
+        """Emit a scheduler liveness beat (store throttles persistence).
+
+        Returns False only when another scheduler has taken the lease — the
+        caller must stop. A store failure counts as still holding it
+        (monitoring never stops a job).
+        """
+        return self._try(self._store.record_heartbeat) is not False
+
+    def claim_scheduler(self, force: bool = False) -> Dict[str, Any]:
+        """Take the single-scheduler lease before any job runs (Day 15).
+
+        The lease is fresh for 3x the heartbeat persist interval (the same
+        window ``summary()`` uses to call the scheduler alive). If the store
+        cannot be reached the claim is granted and marked ``unverified`` —
+        a scheduler with no database cannot do any harm to it anyway.
+        """
+        stale_after = max(1, settings.job_heartbeat_persist_minutes) * 60 * 3
+        owner = scheduler_owner()
+        try:
+            result = self._store.claim_scheduler(owner, stale_after, force=force)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Scheduler lease could not be checked (%s) — starting unverified", e)
+            return {"claimed": True, "holder": owner, "age_seconds": None, "unverified": True}
+        result.setdefault("owner", owner)
+        return result
+
+    def release_scheduler(self) -> None:
+        """Give the lease up on a clean stop so a replacement starts at once."""
+        self._try(self._store.release_scheduler, scheduler_owner())
 
     # ── Reporting ─────────────────────────────────────────────────────
 

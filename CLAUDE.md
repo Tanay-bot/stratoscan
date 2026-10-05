@@ -73,8 +73,11 @@ These are the constraints that, if violated, break the product or its cost model
 editing anything.**
 
 1. **One scheduler process, ever.** `python -m src.main scheduler` must run exactly once. The
-   container entrypoint starts ONLY uvicorn. Never add code that spawns a second scheduler, and
-   never "fix" deploy scaling by adding machines.
+   container entrypoint runs one role per process (`api` = migrations + uvicorn, `scheduler`);
+   on Fly they are two process groups (`fly.toml [processes]`), scaled `app=1 scheduler=1`.
+   Since Day 15 a lease enforces it: a second scheduler is refused at startup (exit 3 + alert)
+   while the first's lease (`scheduler_heartbeat.owner`) is fresh. Never add code that spawns a
+   second scheduler, and never "fix" deploy scaling by adding machines.
 2. **The four-layer pipeline costs are sacred.** Screener = 0 API calls per query. Interpreter =
    ≤1 LLM call per unique query (cached 24h). Backtest = yfinance downloads (cached in the
    backtest DB). Never call an external API per-stock in a hot path.
@@ -198,7 +201,7 @@ stratoscan/                          # Backend (Python)
 ├── load_test.py             # Day 13: concurrency ramp on /screen + /backtest/async (→ LOAD.md)
 ├── accuracy_loop.py         # 30-query accuracy verification loop
 ├── rule_execution_loop.py   # Rule-execution ground-truth tests
-├── alembic/                 # Migrations (19 versions)
+├── alembic/                 # Migrations (20 versions)
 ├── Dockerfile, docker-entrypoint.sh
 ├── fly.toml, fly.staging.toml
 ├── .env.example, staging.env(.example)
@@ -778,7 +781,7 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 | `usage_counters` | (`user_id` FK CASCADE, `period` 'YYYY-MM', `kind`) PK, `count` | Day 12 metered usage (backtests). Charged atomically (`consume_usage`: `… WHERE count < limit`). |
 | `app_counters` | `name` PK, `value` | Counters that never go backwards; `grandfathered_pro` = slots issued (≤ 100). |
 | `job_runs` | `id`, `job_name`, `status` ('running'/'success'/'failed'/'skipped'), `started_at`, `finished_at`, `duration_ms`, `records`, `details`, `error` | Job monitor. |
-| `scheduler_heartbeat` | `id` (=1) PK, `last_beat_at`, `pid` | Single-row liveness beacon. |
+| `scheduler_heartbeat` | `id` (=1) PK, `last_beat_at`, `pid`, `owner` (`host:pid`, Day 15 lease) | Single-row liveness beacon + the single-scheduler lease. |
 | `backtest_jobs` | `job_id` PK, `user_email`, `query`, `status` ('queued'/'running'/'done'/'error'/'interrupted'), `phase`, `done_symbols` JSONB, `total_symbols`, `result` JSONB, `error`, timestamps | Async backtest durability; orphans marked 'interrupted' on restart. |
 | `user_data` | `user_id` PK FK users ON DELETE CASCADE, `watchlist` JSONB, `saved_screeners` JSONB, `recent_backtests` JSONB, `updated_at` | Per-user saved state synced from frontend. |
 | `events` | `id`, `name`, `occurred_at` TIMESTAMPTZ, `anon_id`, `user_id` FK users ON DELETE SET NULL, `props` JSONB | The product funnel (Day 4). Written ONLY by `src/analytics.track()`; the per-event prop whitelist lives in `EVENTS` there — no query text, email, symbol list or exception message is ever stored. `user_id` is SET NULL on account deletion, so deleting an account anonymises its events instead of deleting history. |
@@ -804,11 +807,11 @@ idempotent (`IF NOT EXISTS` + `ADD COLUMN IF NOT EXISTS` backfills).
 
 ### Migrations
 
-Alembic under `stratoscan/alembic/` (19 versions: users, stock_master, news tables, admin
+Alembic under `stratoscan/alembic/` (20 versions: users, stock_master, news tables, admin
 role, email verification columns, user_data, job monitor tables, screener quality columns,
 stripe add/drop, then the Day 3–14 additions — token version, password reset, Google sub,
 events/error_log, shared_results, saved strategies + digest, explanations, entitlements,
-`asset_type`). `docker-entrypoint.sh` runs `alembic upgrade head` (retried ×5 for cold
+`asset_type`, `scheduler_heartbeat.owner`). `docker-entrypoint.sh` runs `alembic upgrade head` (retried ×5 for cold
 Neon) before uvicorn. `python -m src.main setup` runs the same + backtest/news schemas.
 `init_schema()` self-heals on API startup as a belt-and-suspenders measure.
 
@@ -915,12 +918,20 @@ pools are **closed** so Neon can auto-suspend (~50h/month compute, inside the fr
 - Each job is `stale` when its last success is older than `interval × stale_multiplier` (3×).
 - `_alert_if_stale()` (checked every 600s in the loop) fires a throttled webhook/email alert
   when any job is stale or the scheduler is dead. `JobMonitor.run` also alerts on failed jobs.
-- **Watchdog model:** Fly restarts a crashed API machine (`/health` check,
-  `auto_stop_machines = "off"`, `min_machines_running = 1`). The scheduler is a separate
-  process the entrypoint does NOT start, so a dead scheduler is detected by the heartbeat
-  alert (~45 min), and recovery is manual:
-  `flyctl machines restart <machine-id> -a stratoscan-api`. Documented in `SCHEDULER.md`
-  (§5.2 describes adding a `[processes]` group so Fly supervises both).
+- **Watchdog model (Day 15):** `fly.toml` runs two process groups from one image — `app`
+  (`./docker-entrypoint.sh api`: migrations, then uvicorn; `/health` check) and `scheduler`
+  (`./docker-entrypoint.sh scheduler`) — so Fly restarts either on crash. Before Day 15 there
+  was no scheduler process on Fly at all. A dead scheduler is still caught by the heartbeat
+  alert (~45 min).
+- **Single-scheduler lease (Day 15):** `JobMonitor.claim_scheduler()` runs before any job.
+  Owner = `host:pid` (`job_monitor.scheduler_owner`). Granted when free, already ours (a
+  restarted container keeps hostname + pid 1), stale (last beat > 3× persist interval) or
+  forced (`SCHEDULER_TAKEOVER=true` / `scheduler --takeover`); otherwise
+  `SchedulerAlreadyRunning` → exit 3 + "Second scheduler refused" alert. Heartbeat writes only
+  land while we hold the lease; losing it stops the loop. SIGTERM/SIGINT → clean stop →
+  `release_scheduler()`, so a replacement starts at once. An UNCLEAN stop leaves the lease held
+  for up to 45 min — a replacement with a new hostname is refused until then unless taken
+  over (seen in the Day 15 rehearsal). Store unreachable → start anyway, marked unverified.
 
 ### `GET /ops/jobs` & `/ops/jobs/{job_name}`
 
@@ -1211,7 +1222,10 @@ Five GitHub Actions workflows (push to `main`; frontend ones and e2e also on PRs
    failure) → stage secrets (`fly secrets import --stage`, skips unset GitHub secrets so live
    Fly values are never wiped; `APP_ENV=production` set directly) → `fly deploy --remote-only`
    (entrypoint runs `alembic upgrade head` ×5 retry for cold Neon before uvicorn) →
-   healthcheck gate (poll `/health` for 200, ~5 min budget) → `fly rollback` on failure.
+   healthcheck gate (poll `/health` for 200, ~5 min budget) → rollback on failure. There is
+   **no `fly rollback` command** (the step that called one was fixed on Day 15): each deploy's
+   image is labelled `sha-<commit>`, and a rollback redeploys
+   `registry.fly.io/stratoscan-api:sha-<last green commit>` (found via the Actions API).
    Manual trigger: `workflow_dispatch` with `run_release_gate` input.
 4. **`e2e.yml`** (every push + PR): Postgres service container → backend + frontend deps →
    `npx playwright install --with-deps chromium` → `npx playwright test` (starts `e2e_stack.py`
@@ -1226,8 +1240,9 @@ Five GitHub Actions workflows (push to `main`; frontend ones and e2e also on PRs
 `ALERT_WEBHOOK_URL`, `LOG_*`, `SENTRY_DSN`), plus staging release-gate secrets
 (`STAGING_DATABASE_URL`, staging LLM keys).
 
-**Infra:** Fly.io `fly.toml` (single always-on machine, iad region, `/health` check every 30s,
-256MB VM ≈ $2–3/mo). Vercel for the frontend. `DEPLOY.md` is the manual runbook; the
+**Infra:** Fly.io `fly.toml` (two process groups — `app` + `scheduler` — one machine each, iad
+region, `/health` check every 30s on `app`, 256MB VMs). Launch runbook, drills and costs:
+`RUNBOOK.md`. Vercel for the frontend. `DEPLOY.md` is the manual runbook; the
 workflows win when the two disagree. Frontend security headers ship via
 `frontend/vercel.json` — Vercel ignores `public/_headers`, which is kept only as a
 portable mirror and pinned in sync by `npm run verify:headers`.

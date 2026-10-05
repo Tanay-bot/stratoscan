@@ -402,6 +402,10 @@ class Settings(BaseSettings):
     # fallback when no database — monitoring never breaks a refresh job.
     job_monitor_enabled: bool = True
     job_heartbeat_persist_minutes: int = 15
+    # Day 15: force the single-scheduler lease (only when the previous holder
+    # is really gone but its lease is still fresh, e.g. a machine replaced
+    # mid-heartbeat). Normally false: a second scheduler is refused.
+    scheduler_takeover: bool = False
 
     # ── Observability & Alerting ────────────────────────────────────────
     # Two delivery channels (src/alerts.py) — at least one must be set or

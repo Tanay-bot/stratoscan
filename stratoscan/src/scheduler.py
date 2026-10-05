@@ -61,6 +61,14 @@ TECHNICAL_REFRESH_INTERVAL: int = 4  # Every 4th cycle = every 60 min
 NEWS_REFRESH_MINUTES: int = settings.news_refresh_minutes
 
 
+class SchedulerAlreadyRunning(RuntimeError):
+    """Another live scheduler holds the single-scheduler lease (Day 15)."""
+
+
+def _raise_keyboard_interrupt(signum, frame):  # noqa: ARG001 — signal handler signature
+    raise KeyboardInterrupt
+
+
 class DataRefreshScheduler:
     """Manages background data refresh jobs using an in-process scheduler.
 
@@ -398,13 +406,50 @@ class DataRefreshScheduler:
                 run.error = str(e)
                 logger.error("[Cache Warmer] Failed: %s", e)
 
-    def start(self) -> None:
-        """Start the scheduler. Runs indefinitely until interrupted."""
+    def start(self, takeover: bool = False) -> None:
+        """Start the scheduler. Runs indefinitely until interrupted.
+
+        Day 15: first takes the single-scheduler lease (golden rule 1). A
+        second scheduler anywhere — another container, another machine, a
+        forgotten terminal — is refused before it runs a single job, and an
+        alert says so; ``takeover`` (or ``SCHEDULER_TAKEOVER=true``) forces it.
+
+        Raises:
+            SchedulerAlreadyRunning: another live scheduler holds the lease.
+        """
         if self._running:
             logger.warning("Scheduler is already running")
             return
 
+        lease = self._monitor.claim_scheduler(force=takeover or settings.scheduler_takeover)
+        if not lease.get("claimed"):
+            age = lease.get("age_seconds")
+            msg = (
+                f"Another scheduler ({lease.get('holder')}) holds the lease, last beat "
+                f"{age / 60:.0f} min ago" if age is not None else
+                f"Another scheduler ({lease.get('holder')}) holds the lease"
+            )
+            logger.error("Refusing to start: %s. Only one scheduler may run (golden rule 1). "
+                         "If that scheduler is really gone, start with SCHEDULER_TAKEOVER=true.", msg)
+            from src.alerts import send_alert
+
+            send_alert("Second scheduler refused", message=msg, level="error",
+                       throttle_key="scheduler:second")
+            raise SchedulerAlreadyRunning(msg)
+        if lease.get("unverified"):
+            logger.warning("Scheduler lease unverified (job monitor store unreachable)")
+        else:
+            logger.info("Scheduler lease held by %s", lease.get("holder"))
+
         self._running = True
+        # docker stop / Fly send SIGTERM: turn it into the same clean stop as
+        # Ctrl+C so the lease is released and a replacement starts at once.
+        try:
+            import signal
+
+            signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+        except ValueError:  # not the main thread (tests) — nothing to install
+            pass
 
         # Schedule jobs
         schedule.every(PRICE_REFRESH_MINUTES).minutes.do(self.job_refresh_prices)
@@ -424,11 +469,6 @@ class DataRefreshScheduler:
             schedule.every().day.at(settings.digest_time).do(self.job_send_digest)
             logger.info("Weekly digest pass scheduled daily at %s", settings.digest_time)
 
-        # Run initial refresh immediately
-        logger.info("Running initial price refresh...")
-        self.job_refresh_prices()
-        self._monitor.heartbeat()
-
         logger.info(
             "Scheduler started. "
             "Price refresh every %d min, "
@@ -443,12 +483,22 @@ class DataRefreshScheduler:
             NEWS_REFRESH_MINUTES,
         )
         try:
+            # Run the initial refresh inside the try: a stop that lands during
+            # it must still release the lease (finally, below).
+            logger.info("Running initial price refresh...")
+            self.job_refresh_prices()
+            self._monitor.heartbeat()
+
             last_health_alert = 0.0
             while self._running:
                 schedule.run_pending()
                 # Heartbeat persists at most every N minutes (store-throttled)
-                # so Neon can still suspend between refresh cycles.
-                self._monitor.heartbeat()
+                # so Neon can still suspend between refresh cycles. False =
+                # another scheduler took the lease over: stop, don't double up.
+                if not self._monitor.heartbeat():
+                    logger.error("Scheduler lease taken over by another process — stopping")
+                    self._running = False
+                    break
                 # Alert on a stale job / dead scheduler, but check at most
                 # every 10 min — each check queries the job-monitor store,
                 # and the alert itself is throttled per key in src/alerts.py.
@@ -463,6 +513,8 @@ class DataRefreshScheduler:
         except Exception as e:
             logger.error("Scheduler error: %s", e)
             self._running = False
+        finally:
+            self._monitor.release_scheduler()
 
     def _alert_if_stale(self) -> None:
         """Alert the operator if any job is stale or the scheduler is dead.

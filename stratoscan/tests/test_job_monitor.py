@@ -153,7 +153,11 @@ assert params1 == ("failed", 50.0, 0, "x", "boom", 1), params1
 pg.record_heartbeat()
 sql2, params2 = conn.cursor_calls[2].executed[0]
 assert "INSERT INTO scheduler_heartbeat" in sql2 and "ON CONFLICT" in sql2, sql2
-assert params2 == (os.getpid(), os.getpid()), params2
+# Day 15: the beat carries the lease owner and only lands while we hold it.
+from src.job_monitor import scheduler_owner  # noqa: E402
+
+assert params2 == (os.getpid(), scheduler_owner()), params2
+assert "scheduler_heartbeat.owner = EXCLUDED.owner" in sql2 and "RETURNING owner" in sql2, sql2
 
 # Throttle: a second heartbeat within the interval is a NO-OP (no SQL).
 conn.cursor_calls.clear()

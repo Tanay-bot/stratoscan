@@ -578,9 +578,15 @@ SCHEDULER_HEARTBEAT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS scheduler_heartbeat (
     id           SMALLINT PRIMARY KEY DEFAULT 1,
     last_beat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    pid          INTEGER
+    pid          INTEGER,
+    owner        TEXT
 );
 """
+# Day 15: ``owner`` ("host:pid") is the single-scheduler lease — see
+# job_monitor.JobMonitorStore.claim_scheduler.
+SCHEDULER_HEARTBEAT_BACKFILL = [
+    "ALTER TABLE scheduler_heartbeat ADD COLUMN IF NOT EXISTS owner TEXT",
+]
 
 # ── PostgreSQL (main DB): backtest_jobs table ─────────────────────
 # Per-user async backtest job persistence. The in-memory _BACKTEST_JOBS
@@ -977,6 +983,8 @@ class PostgresDB:
                 for idx in JOB_RUNS_INDEXES:
                     cur.execute(idx)
                 cur.execute(SCHEDULER_HEARTBEAT_SCHEMA)
+                for stmt in SCHEDULER_HEARTBEAT_BACKFILL:
+                    cur.execute(stmt)
                 cur.execute(USER_DATA_SCHEMA)
                 cur.execute(BACKTEST_JOBS_SCHEMA)
                 for idx in BACKTEST_JOBS_INDEXES:

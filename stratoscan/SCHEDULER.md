@@ -206,29 +206,30 @@ flyctl machines list -a stratoscan-api
 flyctl machines restart <machine-id> -a stratoscan-api
 ```
 
-### 5.2 Recommended hardening — let Fly supervise the scheduler
+### 5.2 Fly supervises the scheduler (done, Day 15)
 
-The clean fix (so machine restart covers the scheduler automatically) is a
-`[processes]` group in `fly.toml` — two processes, one machine, one
-restart-on-crash:
+`fly.toml` now has a `[processes]` group — one image, two process groups:
 
 ```toml
 [processes]
-  api = "python -m src.main serve --no-reload"
-  scheduler = "python -m src.main scheduler"
+  app = "api"            # ./docker-entrypoint.sh api       → alembic upgrade head, then uvicorn
+  scheduler = "scheduler" # ./docker-entrypoint.sh scheduler → the data jobs
 ```
 
-Then `fly deploy` boots both and Fly restarts **both** on crash. **Do not**
-scale to more than one machine (duplicate scheduler = duplicate jobs).
+Fly passes each command as the ENTRYPOINT's argument (`ENTRYPOINT
+["./docker-entrypoint.sh"]`, empty CMD), so the API still runs migrations
+first — the old "migration trap" no longer applies. Keep `fly scale count
+app=1 scheduler=1`. Until Day 15 this block did not exist and production ran
+**no scheduler at all**.
 
-> ⚠️ **Migration trap.** The `[processes]` block replaces the container CMD,
-> so `docker-entrypoint.sh` (which runs `alembic upgrade head` before
-> uvicorn) would **not** run for the `api` process — every future deploy
-> would silently skip migrations. If you adopt `[processes]`, keep the
-> entrypoint as the `api` command (e.g. `api = "./docker-entrypoint.sh"`)
-> or run `alembic upgrade head` explicitly as a release step before the
-> deploy finishes (the deploy workflow's healthcheck gate would catch a
-> broken schema, but that's the hard way to learn).
+**The lease.** A scheduler claims `scheduler_heartbeat.owner` (`host:pid`)
+before its first job. A second one — another machine, a forgotten terminal,
+`docker compose run scheduler` — is refused (exit 3, "Second scheduler
+refused" alert) while the lease is fresh (3 × the persist interval). A clean
+stop (SIGTERM/SIGINT) releases it. After an UNCLEAN stop a replacement on a
+new host is refused for up to 45 minutes; if the old one is really gone,
+start with `SCHEDULER_TAKEOVER=true` (or `python -m src.main scheduler
+--takeover`). Rehearsed live in the Day 15 dress rehearsal (RUNBOOK.md).
 
 ### 5.3 How to confirm recovery
 

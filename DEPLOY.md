@@ -143,8 +143,10 @@ push to `main` (or via **Actions → Backend Deploy → Run workflow**):
    `alembic upgrade head` (retried ×5 for cold Neon) before uvicorn starts,
    so **migrations are part of every deploy**.
 4. **Healthcheck gate** — polls `/health` until 200 (~5 min budget).
-5. **Rollback** — if `/health` never returns 200, `fly rollback` restores the
-   previous release and the run fails loudly.
+5. **Rollback** — if `/health` never returns 200, the workflow redeploys the image of the
+   last green deploy (`registry.fly.io/stratoscan-api:sha-<commit>`) and the run fails loudly.
+   There is no `fly rollback` command; by hand it is `fly releases -a stratoscan-api --image`,
+   then `fly deploy -a stratoscan-api --image <ref> --strategy immediate -y`. See `RUNBOOK.md`.
 
 ### First deploy (manual — one-time)
 

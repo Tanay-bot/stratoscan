@@ -1,15 +1,24 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stratoscan backend — Fly.io config (always-on single machine)
+# Stratoscan backend — Fly.io config: one image, two process groups.
 #
-# Why always-on: the in-process scheduler (cache warmer, news refresh,
-# job monitor heartbeat) runs inside the API process (src/main.py).
-# auto_stop_machines = "off" keeps the machine running 24/7 so scheduled
-# jobs never sleep — run exactly ONE machine (don't scale to multiple
-# instances or the scheduler jobs will duplicate).
+#   app       → ./docker-entrypoint.sh api        (alembic upgrade head, then uvicorn)
+#   scheduler → ./docker-entrypoint.sh scheduler  (the data jobs; no HTTP)
+#
+# Day 15: until now this file had no scheduler at all (the entrypoint starts
+# only uvicorn), so production would have run no data jobs and every screen
+# would have emptied after seven days. Fly passes each process command as the
+# ENTRYPOINT's argument, so the API keeps running migrations first.
+#
+# Exactly ONE scheduler machine: `fly scale count app=1 scheduler=1`. A second
+# one is refused at startup by the scheduler lease (src/job_monitor.py) and
+# exits 3 with an alert — but don't rely on the guard, keep the count at 1.
+# kill_signal SIGINT stops the scheduler cleanly, which releases its lease.
 #
 # Deploy:  fly launch --no-deploy   (first time, then fill secrets)
 #          fly secrets set ...      (all env vars — see DEPLOY.md)
 #          fly deploy
+# Roll back: there is no `fly rollback` — redeploy the previous image
+#          (`fly releases --image`, then `fly deploy --image <ref>`); see RUNBOOK.md.
 # ─────────────────────────────────────────────────────────────────────────────
 app = "stratoscan-api"
 primary_region = "iad"
@@ -19,6 +28,10 @@ kill_timeout = 5
 [build]
   dockerfile = "Dockerfile"
 
+[processes]
+  app = "api"
+  scheduler = "scheduler"
+
 [env]
   # Real values come from `fly secrets set` — never commit secrets.
   RATE_LIMIT_ENABLED = "true"
@@ -27,9 +40,10 @@ kill_timeout = 5
   CLIENT_IP_HEADER = "Fly-Client-IP"
 
 [http_service]
+  processes = ["app"]          # the scheduler serves no HTTP
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "off"   # keep the scheduler alive 24/7
+  auto_stop_machines = "off"   # one always-on API machine
   auto_start_machines = true
   min_machines_running = 1
 
