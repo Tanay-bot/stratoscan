@@ -37,7 +37,7 @@ from src.data_fetcher import (
 )
 from src.database import PostgresDB, NewsDB
 from src.job_monitor import JobMonitor, get_job_monitor_store
-from src.cache_warmer import warm_backtest_cache
+from src.cache_warmer import backfill_volume_from_history, warm_backtest_cache
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +373,15 @@ class DataRefreshScheduler:
                 if stats.get("failed"):
                     run.status = "failed"
                     run.error = f"{stats['failed']} symbols failed to warm"
+                # Day 14: the freshly warmed bars carry the volume the quote
+                # API does not — copy it onto the screener rows (DB-only). Its
+                # failure is noted, never allowed to fail the warm itself.
+                try:
+                    vol = backfill_volume_from_history()
+                    run.details += f"; volume backfilled for {vol.get('updated', 0)} symbols"
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("[Cache Warmer] Volume backfill failed: %s", exc)
+                    run.details += "; volume backfill failed"
                 logger.info(
                     "[Cache Warmer] Complete: %s", run.details
                 )

@@ -201,6 +201,10 @@ multi-factor composite. Response (`ScreenResponse`):
   `data_quality.error` explains — never a bare 500.
 - `market_cap` is in **USD**; `current_price` in USD; yields/margins/growth
   in **percent**.
+- **Volume coverage (Day 14).** `volume` / `avg_volume` come from daily bars,
+  which are held for the largest names only, so a volume filter can only match
+  those. When one is applied, `data_quality.partial_coverage` is
+  `{volume: {known, total}}` and `data_quality.message` says it in a sentence.
 
 ### `POST /interpret` — debug the NL parser (no DB query)
 `{query: string}` → `{raw_input, filters, filter_count, llm_error, display}`.

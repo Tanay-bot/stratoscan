@@ -60,6 +60,13 @@ SCORE_SORT_MAX_WINDOW = 2000
 # (a contradictory trend condition, then one sparse numeric column).
 RELAX_MAX_FILTERS = 2
 
+# Day 14: columns filled for only part of the universe. Volume comes from
+# daily bars, which are held for the largest names only (technicals top 500 +
+# the backtest cache), so a volume filter can only ever match those. When one
+# is applied the report says how many stocks carry the column — a filter that
+# quietly ignores most of the universe must say so.
+PARTIAL_COVERAGE_COLUMNS = {"volume": "Volume", "avg_volume": "Average volume"}
+
 # Sort keys the screener accepts (must be a subset of the DB whitelist).
 SORTABLE_COLUMNS: frozenset = frozenset({
     "symbol", "market_cap", "current_price", "price_change_pct", "volume",
@@ -641,6 +648,7 @@ class StockScreener:
                     f"({', '.join(relaxed_labels)}) but still found 0 stocks."
                 )
             report.data_quality["message"] = relax_msg
+        self._note_partial_coverage(report, db_filters)
         if contradiction_notes:
             report.data_quality["contradiction_resolved"] = contradiction_notes
             existing = report.data_quality.get("message")
@@ -650,6 +658,29 @@ class StockScreener:
             )
 
         return report
+
+    def _note_partial_coverage(self, report: "ScreeningReport", db_filters: Dict[str, Any]) -> None:
+        """Day 14: say how much of the universe a partial column covers."""
+        cols = [c for c in PARTIAL_COVERAGE_COLUMNS if c in db_filters]
+        if not cols or report.data_quality.get("error"):
+            return
+        try:
+            cov = self._db.column_coverage(columns=cols + ["symbol"])
+        except Exception:  # noqa: BLE001 — a note must never break a screen
+            return
+        total = int(cov.get("symbol") or 0)
+        partial = {c: {"known": int(cov.get(c) or 0), "total": total}
+                   for c in cols if total and int(cov.get(c) or 0) < total}
+        if not partial:
+            return
+        report.data_quality["partial_coverage"] = partial
+        notes = "; ".join(
+            f"{PARTIAL_COVERAGE_COLUMNS[c]} is known for {v['known']:,} of {v['total']:,} stocks "
+            f"(the largest), so only those can match"
+            for c, v in partial.items()
+        )
+        existing = report.data_quality.get("message")
+        report.data_quality["message"] = f"{existing} {notes}." if existing else f"{notes}."
 
     def _resolve_contradictions(
         self, query: InterpretedQuery

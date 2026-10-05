@@ -1746,6 +1746,23 @@ class PostgresDB:
                 raise
         return {"jobs": jobs, "shares": shares}
 
+    def update_volumes(self, rows: List[Tuple[str, int, int]]) -> int:
+        """Write (symbol, volume, avg_volume) onto EXISTING stock_master rows
+        only (an UPDATE, never an insert). Returns rows updated (Day 14)."""
+        if not rows:
+            return 0
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "UPDATE stock_master AS s SET volume = v.volume, avg_volume = v.avg_volume "
+                    "FROM (VALUES %s) AS v(symbol, volume, avg_volume) WHERE s.symbol = v.symbol",
+                    [(sym, int(vol), int(avg)) for sym, vol, avg in rows],
+                )
+                updated = cur.rowcount
+            conn.commit()
+        return int(updated or 0)
+
     # ── Entitlements (Day 12) ──────────────────────────────────────────
 
     def set_plan_state(
@@ -3192,6 +3209,17 @@ class BacktestDB:
                 cur.execute("SELECT DISTINCT symbol FROM historical_prices ORDER BY symbol")
                 return [row[0] for row in cur.fetchall()]
 
+    def latest_volumes(self, window_start: str, fresh_cutoff: str) -> List[Tuple[str, int, int]]:
+        """(symbol, last volume, 63-session avg volume) for symbols whose newest
+        bar is on/after ``fresh_cutoff``, from bars since ``window_start``;
+        symbols with fewer than 5 bars in the window are skipped (Day 14)."""
+        with self._get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(LATEST_VOLUMES_SQL.format(ph="%s"), (window_start, fresh_cutoff))
+                rows = cur.fetchall()
+        return [(r[0], int(r[1]), int(round(float(r[2])))) for r in rows
+                if r[1] is not None and r[2] is not None and int(r[3]) >= 5]
+
     def get_symbol_max_dates(self) -> Dict[str, Optional[str]]:
         """Newest cached bar date per symbol (one query — cache-warmer staleness).
 
@@ -3284,6 +3312,29 @@ class BacktestDB:
 # ═══════════════════════════════════════════════════════════════════════════════
 # SQLite Client (Backtesting) — local dev / tests fallback
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# Day 14: latest session volume + trailing 63-session average per symbol from
+# the stored daily bars. Bars are read from ``window_start`` (wide enough for
+# 63 sessions); only symbols whose newest bar is on/after ``fresh_cutoff`` are
+# returned, so a delisted name's stale volume is never written back as
+# current. Plain window functions + CASE: the same SQL runs on Postgres and
+# SQLite.
+LATEST_VOLUMES_SQL = """
+    WITH r AS (
+        SELECT symbol, date, volume,
+               ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+        FROM historical_prices
+        WHERE date >= {ph} AND volume IS NOT NULL
+    )
+    SELECT symbol,
+           MAX(CASE WHEN rn = 1 THEN volume END) AS volume,
+           AVG(CASE WHEN rn <= 63 THEN volume END) AS avg_volume,
+           COUNT(*) AS bars
+    FROM r
+    GROUP BY symbol
+    HAVING MAX(date) >= {ph}
+"""
+
 
 class SQLiteDB:
     """Local SQLite database for historical backtesting data.
@@ -3384,6 +3435,15 @@ class SQLiteDB:
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT symbol FROM historical_prices ORDER BY symbol")
         return [row["symbol"] for row in cursor.fetchall()]
+
+    def latest_volumes(self, window_start: str, fresh_cutoff: str) -> List[Tuple[str, int, int]]:
+        """SQLite mirror of BacktestDB.latest_volumes."""
+        conn = self.connect()
+        cursor = conn.cursor()
+        cursor.execute(LATEST_VOLUMES_SQL.format(ph="?"), (window_start, fresh_cutoff))
+        rows = cursor.fetchall()
+        return [(r[0], int(r[1]), int(round(float(r[2])))) for r in rows
+                if r[1] is not None and r[2] is not None and int(r[3]) >= 5]
 
     def get_symbol_max_dates(self) -> Dict[str, Optional[str]]:
         """Newest cached bar date per symbol (one query — cache-warmer staleness).

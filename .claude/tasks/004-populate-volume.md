@@ -1,5 +1,9 @@
 # 004 — Populate `stock_master.volume` from data we already hold
 
+> **Status (Day 14): done** — implemented as `cache_warmer.backfill_volume_from_history()`
+> (run after the daily cache warm and by `python -m src.main backfill-volume`), plus
+> `compute_indicators()` now taking volume from the daily bars. Test: `tests/test_volume_backfill.py`.
+
 ## Goal
 
 Volume filters are advertised to the UI and match nothing.
@@ -96,7 +100,7 @@ python -m src.main sync-volume --symbols AAPL,MSFT --avg-window 60
 
 `tests/test_volume_sync.py`, in this repo's script style: module-level asserts,
 `print("✅ …")` per check, a `Run: python -m tests.test_volume_sync` line in the
-docstring. See `tests/test_lse_source.py` for the shape. It must be hermetic — fake
+docstring. See `tests/test_volume_backfill.py` for the shape. It must be hermetic — fake
 both databases, no network, no real DB.
 
 Pin at minimum:

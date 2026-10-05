@@ -316,6 +316,22 @@ def cmd_backfill_history(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_backfill_volume(args: argparse.Namespace) -> None:
+    """Copy volume / avg_volume from stored daily bars onto the screener rows.
+
+    Usage: python -m src.main backfill-volume
+
+    Finnhub's quote has no volume, so these columns come from the backtest
+    DB's daily bars (Day 14). Database-only, no API calls. The nightly
+    cache-warm job runs it automatically.
+    """
+    from src.cache_warmer import backfill_volume_from_history
+
+    stats = backfill_volume_from_history()
+    print(f"📊 Volume backfill: {stats['updated']} rows updated "
+          f"({stats['symbols']} symbols with recent bars)")
+
+
 def cmd_warm_cache(args: argparse.Namespace) -> None:
     """Warm the backtest history cache for the top screener symbols.
 
@@ -497,6 +513,12 @@ def create_parser() -> argparse.ArgumentParser:
         help="Max stocks to refresh (default: NEWS_SYMBOLS_LIMIT from .env)",
     )
 
+    subparsers.add_parser(
+        "backfill-volume",
+        help="Fill volume/avg_volume from stored daily bars",
+        description="Copy the latest session volume and 63-session average from the backtest DB onto stock_master.",
+    )
+
     # warm-cache
     warm_cache_parser = subparsers.add_parser(
         "warm-cache",
@@ -638,6 +660,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "setup": cmd_setup,
         "scheduler": cmd_scheduler,
         "warm-cache": cmd_warm_cache,
+        "backfill-volume": cmd_backfill_volume,
         "digest": cmd_digest,
         "backfill-history": cmd_backfill_history,
         "enrich": cmd_enrich,

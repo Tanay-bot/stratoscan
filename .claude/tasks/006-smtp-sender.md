@@ -175,7 +175,7 @@ git diff --exit-code requirements.txt requirements-lock.txt && echo "deps unchan
 
 `tests/test_emails_smtp.py` follows this repo's script style (module-level asserts,
 `print("✅ …")` per check, a `Run: python -m tests.test_emails_smtp` line in the
-docstring — see `tests/test_lse_source.py`). Patch `smtplib.SMTP`; **no real socket.**
+docstring — see `tests/test_volume_backfill.py`). Patch `smtplib.SMTP`; **no real socket.**
 Pin at minimum:
 
 - `SMTP_HOST` set → `smtplib.SMTP` is constructed with that host and port, and

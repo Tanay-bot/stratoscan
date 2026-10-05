@@ -51,19 +51,23 @@ before touching the scheduler in production.
   at most every `JOB_HEARTBEAT_PERSIST_MINUTES` (default 15) for the same
   reason.
 
-### Known data-source limitation — `volume` stays NULL
+### Where `volume` comes from (Day 14)
 
-Verified live 2026-08-06:
-this Finnhub plan's `/quote` response omits the `v` field entirely (keys are
-`c d dp h l o pc t` — no `v`), so `fetch_stock_quote` maps it to None for
-every symbol. The candles endpoint that *does* carry volume returns 403
-(paid tier), and `avgVolume` from `/stock/metric` is also None on this plan.
-**This is not a code bug** — the fetcher maps the field correctly; the
-source simply never sends it. Volume-based screener filters will match
-nothing until a plan/data source that provides volume is configured. The
-one populated row (`A` = 123456) is stale placeholder data from an early
-fill — treat it as noise. Technicals (`sma_50`/`rsi_14`/`high_52w`) are
-unaffected: they come from `/technical_indicator` and populate normally.
+Finnhub's `/quote` on this plan has no `v` field (verified live 2026-08-06:
+keys `c d dp h l o pc t`), so volume never comes from the price refresh.
+It comes from daily bars instead, two ways:
+
+- **Technical refresh** — `compute_indicators()` takes `volume` (latest
+  session) and `avg_volume` (trailing 63 sessions) from the yfinance daily
+  bars it already downloads for the top 500.
+- **After the daily cache warm (03:30)** — `backfill_volume_from_history()`
+  copies the same two numbers from `historical_prices` for every symbol with
+  a bar in the last 10 days (an UPDATE onto existing rows; never inserts).
+  Run it by hand with `python -m src.main backfill-volume`. Zero API calls.
+
+Coverage is therefore the cached universe (top-N by market cap), not all
+~5,000 names; the screener's coverage notes say so when a volume filter is
+used on thin coverage.
 
 ---
 

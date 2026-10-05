@@ -526,7 +526,8 @@ symbol in the query text.
   `fetch_technical_indicators` (with `_fetch_technicals_yfinance` fallback),
   `fetch_company_news`.
 - `compute_indicators(df)` — RSI-14, SMA-50/200, MACD-12/26, Bollinger, ATR-14 from an OHLCV
-  frame.
+  frame, plus `volume` (latest session) and `avg_volume` (trailing 63) — Day 14: Finnhub's
+  `/quote` has no volume on this plan, so the quote record carries none.
 - `build_stock_record` — normalizes a Finnhub profile+quote into a `stock_master` row with
   **OTC/ADR unit-confusion guards** (market-cap sanity rules: implied shares ≤ 50B, F-suffix
   cap ≤ $100B, absolute cap ≤ $6T).
@@ -734,6 +735,11 @@ suite a payment adapter must also pass (see `BILLING.md` for the gaps). Grandfat
   against a fresh download.
 - `build_backtest_history_cache(limit)` / `warm_backtest_cache()` — pre-fetch 10y history for
   top-N by market cap (scheduler daily at 03:30).
+- `backfill_volume_from_history()` (Day 14) — copies the latest volume + 63-session average from
+  `historical_prices` onto existing `stock_master` rows (symbols with a bar in the last 10 days;
+  UPDATE only, zero API calls). Runs after each warm (its failure never fails the warm) and as
+  `python -m src.main backfill-volume`. Volume therefore covers the largest names only; a volume
+  filter reports `data_quality.partial_coverage` (`screener.PARTIAL_COVERAGE_COLUMNS`).
 
 ### `src/logging_config.py`
 

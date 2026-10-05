@@ -234,10 +234,27 @@ with mock.patch.object(sched.settings, "backtest_cache_warmer_enabled", True), \
      mock.patch.object(
          sched, "warm_backtest_cache",
          return_value={"warmed": 3, "skipped": 1, "failed": 0, "candidates": 4},
-     ):
+     ), \
+     mock.patch.object(sched, "backfill_volume_from_history", return_value={"symbols": 3, "updated": 2}):
     s.job_warm_backtest_cache()
 run = s._monitor._store.recent_runs("backtest_cache_warm")[0]
 assert run["status"] == "success" and run["records"] == 3
+assert "volume backfilled for 2 symbols" in (run["details"] or ""), run
+
+# Day 14: a volume-backfill failure is noted but never fails the warm.
+s = _make_scheduler()
+with mock.patch.object(sched.settings, "backtest_cache_warmer_enabled", True), \
+     mock.patch.object(
+         type(sched.settings), "has_backtest_database", mock.PropertyMock(return_value=True)
+     ), \
+     mock.patch.object(
+         sched, "warm_backtest_cache",
+         return_value={"warmed": 3, "skipped": 1, "failed": 0, "candidates": 4},
+     ), \
+     mock.patch.object(sched, "backfill_volume_from_history", side_effect=RuntimeError("db down")):
+    s.job_warm_backtest_cache()
+run = s._monitor._store.recent_runs("backtest_cache_warm")[0]
+assert run["status"] == "success" and "volume backfill failed" in (run["details"] or ""), run
 
 # Partial failures -> status failed with the error surfaced
 s2 = _make_scheduler()

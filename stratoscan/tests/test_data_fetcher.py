@@ -253,7 +253,9 @@ fake_client3.quote.return_value = {"c": 150.5, "dp": 1.2, "v": 5000000}
 fake_pool3 = mock.Mock()
 fake_pool3.next.return_value = fake_client3
 q = df.fetch_stock_quote(fake_pool3, "AAPL")
-assert q["current_price"] == 150.5 and q["volume"] == 5000000
+# Day 14: /quote carries no volume on this plan, so the record never claims
+# one (volume comes from daily bars — see tests/test_volume_backfill.py).
+assert q["current_price"] == 150.5 and "volume" not in q
 
 # build_stock_record merges profile + quote + technicals.
 rec = df.build_stock_record(

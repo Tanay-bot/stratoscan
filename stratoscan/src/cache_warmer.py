@@ -332,3 +332,44 @@ def build_backtest_history_cache(
             db.close()
         except Exception:
             pass
+
+
+def backfill_volume_from_history(
+    backtest_db: Optional[Any] = None,
+    screener_db: Optional[Any] = None,
+    today: Optional[str] = None,
+    max_age_days: int = 10,
+) -> Dict[str, Any]:
+    """Day 14: fill ``stock_master.volume`` / ``avg_volume`` from stored bars.
+
+    Finnhub's quote carries no volume, so the screener's volume filter and
+    sort matched nothing. The daily bars the backtester already stores carry
+    it: the latest session's volume and the trailing 63-session average
+    (Finnhub's own avgVolume window). Only symbols with a bar in the last
+    ``max_age_days`` are written, and only onto rows that already exist.
+    Pure database work — no API calls. DBs it creates are closed after.
+    """
+    from datetime import timedelta
+
+    from src.database import PostgresDB
+
+    created_bt, created_main = backtest_db is None, screener_db is None
+    backtest_db = backtest_db or _backtest_db()
+    screener_db = screener_db or PostgresDB()
+    try:
+        now = datetime.strptime(today, "%Y-%m-%d") if today else datetime.now()
+        fresh_cutoff = (now - timedelta(days=max_age_days)).strftime("%Y-%m-%d")
+        # 63 sessions ≈ 92 calendar days; 120 leaves room for holidays.
+        window_start = (now - timedelta(days=120)).strftime("%Y-%m-%d")
+        rows = backtest_db.latest_volumes(window_start, fresh_cutoff)
+        updated = screener_db.update_volumes(rows)
+        logger.info("Volume backfill: %d symbols with recent bars, %d rows updated", len(rows), updated)
+        return {"symbols": len(rows), "updated": updated}
+    finally:
+        for owned, db in ((created_bt, backtest_db), (created_main, screener_db)):
+            if owned and hasattr(db, "close"):
+                try:
+                    db.close()
+                except Exception:  # noqa: BLE001
+                    pass
+

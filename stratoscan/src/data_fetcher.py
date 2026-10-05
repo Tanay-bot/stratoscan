@@ -543,7 +543,9 @@ def fetch_stock_quote(pool: FinnhubClientPool, symbol: str) -> Optional[QuoteDat
             "symbol": symbol,
             "current_price": price,          # Current price (None if bogus)
             "price_change_pct": quote.get("dp"),    # Percent change
-            "volume": quote.get("v"),               # Volume
+            # No volume here: Finnhub's /quote does not return one (the old
+            # ``quote.get("v")`` was always None). It comes from daily bars —
+            # compute_indicators and cache_warmer.backfill_volume_from_history.
         }
     except Exception as e:
         logger.debug("Failed to fetch quote for %s: %s", symbol, e)
@@ -648,6 +650,11 @@ TECH_COLUMNS = [
     "bollinger_upper",
     "bollinger_lower",
     "avg_volume",
+    # Day 14: the latest session's volume. Finnhub's /quote has no volume
+    # field (``quote.get("v")`` was always None), so `volume` was NULL for
+    # every stock while /meta advertised a volume filter and sort. The daily
+    # bars this module already downloads carry it.
+    "volume",
 ]
 
 # How many trailing sessions the avg_volume computation averages. Finnhub's
@@ -694,6 +701,7 @@ def compute_indicators(df) -> Dict[str, Optional[float]]:
             window = vol.tail(AVG_VOLUME_WINDOW)
             if len(window) >= 5:
                 out["avg_volume"] = int(round(float(window.mean())))
+            out["volume"] = int(round(float(vol.iloc[-1])))
 
     if len(close) >= 50:
         out["sma_50"] = round(float(close.rolling(50).mean().iloc[-1]), 2)
